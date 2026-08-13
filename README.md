@@ -153,11 +153,12 @@ localapp skill install claude --project   # → .claude/skills/ in the repo
 the closest relative: both give dev servers named HTTPS URLs, both run a
 daemon, and both address AI agents. The models differ. portless centers on
 wrapping your command (`portless myapp pnpm dev`, handing the child a port
-via `PORT`; `alias` covers already-running servers) and on `.localhost`,
-which some browsers resolve natively (Safari goes through `/etc/hosts`).
-localapp centers on a real local DNS server: whatever domain you pick
+via `PORT`; `alias` covers already-running servers) and on hostname entries:
+`.localhost` resolves natively in some browsers, and Safari plus custom TLDs
+(`--tld test`) are covered by auto-rewriting `/etc/hosts`, one line per
+route. localapp centers on a wildcard DNS server: whatever domain you pick
 resolves for every `getaddrinfo` client — curl included — and every browser,
-with no hosts-file edits. On top of that, path mounts put frontend and
+and adding an app changes nothing on the system. On top of that, path mounts put frontend and
 backend on one origin (no CORS), the CA carries Name Constraints, and the
 control plane is a curl-able JSON API on a Unix socket. In portless's favor:
 Windows and Linux support today, and a LAN/mDNS mode. localapp is a single

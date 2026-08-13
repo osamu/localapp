@@ -122,10 +122,11 @@ localapp skill install claude --project   # リポジトリ配下 .claude/skills
 **vs. [portless](https://github.com/vercel-labs/portless)**（Vercel Labs）—
 最も近い存在で、dev サーバーへの名前付き HTTPS URL・常駐デーモン・AI エージェント対応という
 点は共通する。モデルが違う。portless はコマンドのラップが中心（`portless myapp pnpm dev` で
-子プロセスに `PORT` を払い出す。既存サーバーは `alias` で登録）で、一部ブラウザが特別扱いする
-`.localhost` に依存する（Safari は `/etc/hosts` 経由）。localapp は実 DNS サーバーが中心で、
-任意のドメインが curl 含む `getaddrinfo` 経由すべて・全ブラウザで解決でき、hosts の書き換えも
-ない。加えてパスマウントで同一オリジンにでき CORS を消せる、CA は Name Constraints 付き、
+子プロセスに `PORT` を払い出す。既存サーバーは `alias` で登録）で、名前解決はホスト名の個別登録
+（`.localhost` は一部ブラウザが特別扱い。Safari とカスタム TLD（`--tld test`）は `/etc/hosts` を
+ルートごとに自動書き換え）。localapp はワイルドカード DNS サーバーが中心で、任意のドメインが
+curl 含む `getaddrinfo` 経由すべて・全ブラウザで解決でき、アプリを追加してもシステム側の変更は
+一切ない。加えてパスマウントで同一オリジンにでき CORS を消せる、CA は Name Constraints 付き、
 制御プレーンは Unix socket 上の curl 可能な JSON API。portless が勝る点: Windows / Linux
 対応済み、LAN/mDNS モード。localapp は単一静的 Go バイナリで、現状 macOS のみ。
 
