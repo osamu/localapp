@@ -47,6 +47,45 @@ sudo localapp install --domain dev.test     # ドメインを指定する場合
 ドメインには `local` / `localhost` とその配下は指定できない（mDNS 等の予約域）。
 変更する場合は `sudo localapp uninstall` 後に `--domain` を付けて再インストールする。
 
+## 仕組み
+
+1 バイナリ・1 デーモン・3 つのループバックリスナー（DNS・プロキシ・制御ソケット）。
+
+```
+          ┌─────────────────────── your machine ────────────────────────┐
+          │                                                             │
+ browser ─┤ ① "myapp.localapp?" ▶ /etc/resolver/localapp               │
+          │                        └▶ 127.0.0.1:15353 (DNS)             │
+          │                            always answers: 127.0.0.1        │
+          │                                                             │
+          ├ ② https://myapp.localapp ▶ 127.0.0.1:443 (proxy)           │
+          │      ▲                       ├ ③ mints a cert for the SNI  │
+          │      │ cert chains to        │    on the fly (local CA)     │
+          │      │ your local CA         └ looks up "myapp" ▶ :5173     │
+          │                                                             │
+ CLI /    ├ ④ HTTP+JSON over a unix socket ▶ registry { app → port }   │
+ agent    │                                                             │
+          └─────────────────────────────────────────────────────────────┘
+```
+
+1. **名前解決** — `install` は `/etc/resolver/<ドメイン>` という 1 ファイルを置くだけ。
+   macOS は `*.<ドメイン>` の DNS クエリ（それ以外は対象外）をローカル DNS サーバーへ送り、
+   この DNS はどんな名前にも `127.0.0.1` を返す。アプリを追加しても DNS には二度と触らない。
+
+2. **ルーティング** — ブラウザは `127.0.0.1:443` のプロキシへ接続する。プロキシはホスト名から
+   registry を引き、`localhost:<port>` へ転送する。WebSocket（HMR）・ストリーミング・`Host`
+   ヘッダは透過。パスマウント（`/api/*`）は同一オリジンになるため CORS は登場しない。
+
+3. **HTTPS** — TLS ハンドシェイク中に、そのホスト名の証明書をその場で発行する（90 日キャッシュ）。
+   署名するのは install 時に 1 回だけ作られるローカル CA で、critical な **Name Constraints**
+   により開発ドメイン外は暗号学的に保証不能。
+
+4. **登録** — `localapp add 5173` や `localapp run`、あるいは同梱 SKILL 経由の AI エージェントが、
+   Unix socket 上の HTTP API で registry に `{app → port}` を書き込む。サーバーが止まっても `down` 表示になる
+   だけで、URL 自体は永続する。
+
+`/etc/hosts` の編集も、アプリごとの設定もない。ループバック外で listen するものは何もない。
+
 ## 使い方
 
 ```sh
@@ -66,6 +105,7 @@ localapp add 8000 --app myapp --service api --path /api  # https://myapp.<ドメ
 ```
 
 dev サーバーを止めても登録は消えない（`down` 表示になる）。ポートを変えて再登録すれば上書きされる。
+デーモンの状態は `localapp status`、ログは `localapp logs -f` で確認できる。
 
 ## Coding Agent 連携
 
@@ -77,20 +117,20 @@ localapp skill install codex      # ~/.codex/skills/localapp/
 localapp skill install claude --project   # リポジトリ配下 .claude/skills/ に配置
 ```
 
-## トラブルシュート
+## 比較
 
-| 現象 | 対処 |
-|---|---|
-| Vite が `Blocked request` を返す | `server.allowedHosts: ['.<ドメイン>']` |
-| HMR が接続できない | `server.hmr: { clientPort: 443, protocol: 'wss' }` |
-| Next.js が cross-origin を警告 / 拒否 | `next.config` の `allowedDevOrigins` に `.<ドメイン>` を追加 |
-| Node / curl が証明書エラー | `NODE_EXTRA_CA_CERTS=$(localapp ca path)` / `SSL_CERT_FILE=$(localapp ca path)` |
-| Firefox のみ証明書エラー | Firefox は独自トラストストアを持つため `certutil -A` で手動登録 |
-| アドレスバーで検索になってしまう | `https://` を付けて入力するか `localapp open <app>` を使う |
-| Docker コンテナから解決できない | `--add-host <app>.<ドメイン>:host-gateway` + CA をコンテナへ配置 |
-| Go / Node スクリプトから解決できない | 仕様（名前解決は `getaddrinfo` 経由のみ）。プログラム間通信は `localhost:PORT` を使う |
+**vs. [portless](https://github.com/vercel-labs/portless)**（Vercel Labs）—
+最も近い存在で、dev サーバーへの名前付き HTTPS URL・常駐デーモン・AI エージェント対応という
+点は共通する。モデルが違う。portless はコマンドのラップが中心（`portless myapp pnpm dev` で
+子プロセスに `PORT` を払い出す。既存サーバーは `alias` で登録）で、一部ブラウザが特別扱いする
+`.localhost` に依存する（Safari は `/etc/hosts` 経由）。localapp は実 DNS サーバーが中心で、
+任意のドメインが curl 含む `getaddrinfo` 経由すべて・全ブラウザで解決でき、hosts の書き換えも
+ない。加えてパスマウントで同一オリジンにでき CORS を消せる、CA は Name Constraints 付き、
+制御プレーンは Unix socket 上の curl 可能な JSON API。portless が勝る点: Windows / Linux
+対応済み、LAN/mDNS モード。localapp は単一静的 Go バイナリで、現状 macOS のみ。
 
-デーモンの状態は `localapp status`、ログは `localapp logs -f` で確認できる。
+**vs. Caddy + dnsmasq + mkcert** — 定番の手組みスタックは 3 ツール・3 設定 + アプリごとの
+証明書配線が必要。localapp は 1 バイナリ・`sudo localapp install` 1 回で、アプリごとの設定はない。
 
 ## アンインストール
 
