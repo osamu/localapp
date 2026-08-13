@@ -34,11 +34,25 @@ localapp status
   > localapp is not installed. Running `sudo localapp install` makes the app
   > reachable at a fixed URL (https://<app-name>.<domain>).
 
-### 2. Start the dev server and get the port it actually listens on
+### 2. Start the dev server
 
-Start it in the background and read the port number from its output. When the
-requested port is in use, dev servers switch to a different one on their own.
-**Use the port from the startup output, not the value in the config file.**
+Two ways. Prefer `localapp run` when you are the one starting the server and
+the framework honors the `PORT` environment variable (Next.js, Express, Nuxt,
+Rails, most Node servers):
+
+```sh
+localapp run -- npm run dev &
+```
+
+`run` allocates a free port, injects it as `PORT`, registers the service, and
+prints the URL — steps 3 and 4 below are then already done. If nothing
+listens after a few seconds, the framework ignores `PORT` (Vite, Flask,
+Django, …); fall back to the manual path.
+
+Manual path: start the server in the background and read the port number from
+its output. When the requested port is in use, dev servers switch to a
+different one on their own. **Use the port from the startup output, not the
+value in the config file.**
 
 ```
 VITE v5.4.0  ready in 412 ms
@@ -125,6 +139,7 @@ Add `--strip-path` only when the backend serves paths without the `/api` prefix
 | Command | Purpose |
 |---|---|
 | `localapp add <port>` | register (idempotent). `--app --service --path --strip-path --pid --json` |
+| `localapp run [--] <cmd> [args...]` | allocate a port, inject `PORT`, register, run the command. `--app --service --path --strip-path` |
 | `localapp ls [--json]` | list registrations (URL, port, status) |
 | `localapp rm <app>[/<service>]` | remove a registration |
 | `localapp status [--json]` | daemon liveness. The `domain` field holds the current development domain; exits 1 when stopped |

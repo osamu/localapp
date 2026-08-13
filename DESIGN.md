@@ -84,6 +84,7 @@ localapp rm app1/api                       # remove one service
 | Command | Purpose |
 |---|---|
 | `localapp add <port>` | register (idempotent). `--app --service --path --strip-path --pid --json` |
+| `localapp run [--] <cmd> [args...]` | allocate a free port, inject it as `PORT`, register, run the command; exits with the command's status. `--app --service --path --strip-path` |
 | `localapp rm <app>[/<service>]` | remove registration |
 | `localapp ls [--json]` | list (URL, port, status) |
 | `localapp open <app>` | open in browser |
@@ -202,9 +203,22 @@ Use path mounts when in-browser JS calls the app's own API (same origin: no
 CORS, no SameSite issues — the recommended default). Use subdomains to match
 production layouts.
 
+### Wrapper mode (`run`)
+
+`add` attaches to something already listening; `run` inverts the causality:
+it asks the kernel for a free loopback port, registers it, then executes the
+command with `PORT=<port>` in the environment — the PaaS convention most web
+frameworks honor. This removes port conflicts and the register step entirely.
+Registration happens before the spawn (fail fast when the daemon is down),
+the child PID is recorded after, signals are forwarded, and the exit status
+is the command's. When nothing listens on the port after a few seconds, a
+hint points at `add` (the command likely ignores `PORT` — e.g. Vite, Flask;
+see "Known limitations" for the convention's reach). The registration
+persists after exit, like any other.
+
 ## Registration lifecycle
 
-Clients re-run `add` on every dev-server restart, so:
+Clients re-run `add` (or `run`) on every dev-server restart, so:
 
 - **Idempotent** — re-registering the same `app`+`service` overwrites the port.
 - **Registrations persist** — a stopped server shows `down`; only explicit

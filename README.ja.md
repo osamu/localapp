@@ -50,7 +50,8 @@ sudo localapp install --domain dev.test     # ドメインを指定する場合
 ## 使い方
 
 ```sh
-localapp add 5173                 # 現在のディレクトリ名で登録 → https://<dir名>.<ドメイン>/
+localapp run -- npm run dev       # 空きポートを PORT として注入し、登録して実行
+localapp add 5173                 # 既に動いているサーバーに後付け登録
 localapp ls                       # 一覧（URL・ポート・状態）
 localapp open myapp               # ブラウザで開く
 localapp rm myapp                 # 登録削除

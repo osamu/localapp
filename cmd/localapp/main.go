@@ -45,6 +45,8 @@ func run(args []string) int {
 	switch cmd {
 	case "add":
 		return cmdAdd(rest)
+	case "run":
+		return cmdRun(rest)
 	case "rm":
 		return cmdRm(rest)
 	case "ls":
@@ -89,6 +91,9 @@ Usage:
 Commands:
   add <port>            register a service (idempotent)
                         --app --service --path --strip-path --pid --json
+  run [--] <cmd> [args...]  allocate a free port, inject it as PORT, register,
+                        and run the command; exits with the command's status
+                        --app --service --path --strip-path
   rm <app>[/<service>]  remove a registration
   ls [--json]           list the registrations
   status [--json]       show daemon liveness, listeners and counts
