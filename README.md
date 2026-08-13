@@ -73,7 +73,8 @@ Details in [SECURITY.md](SECURITY.md) and [DESIGN.md](DESIGN.md).
 ## Usage
 
 ```sh
-localapp add 5173                 # register cwd's app → https://<dirname>.<domain>/
+localapp run -- npm run dev       # allocate a port, inject PORT, register, run
+localapp add 5173                 # or attach to something already running
 localapp ls                       # list registrations (URL, port, status)
 localapp open myapp               # open in browser
 localapp rm myapp                 # remove registration
