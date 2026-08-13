@@ -1,0 +1,11 @@
+# Build artifacts
+/localapp
+dist/
+*.test
+
+# OS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
