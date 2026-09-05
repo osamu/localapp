@@ -49,6 +49,32 @@ func Load(p platform.Platform) Config {
 	return c
 }
 
+// NonDefaultEnv serializes runtime overrides for a service manager, which does
+// not inherit the installing process's environment. A default socket follows
+// StateDir, so only an independently overridden socket needs its own entry.
+func (c Config) NonDefaultEnv(p platform.Platform) map[string]string {
+	env := map[string]string{}
+	if c.Domain != DefaultDomain {
+		env["LOCALAPP_DOMAIN"] = c.Domain
+	}
+	if c.DNSPort != DefaultDNSPort {
+		env["LOCALAPP_DNS_PORT"] = strconv.Itoa(c.DNSPort)
+	}
+	if c.HTTPPort != DefaultHTTPPort {
+		env["LOCALAPP_HTTP_PORT"] = strconv.Itoa(c.HTTPPort)
+	}
+	if c.HTTPSPort != DefaultHTTPSPort {
+		env["LOCALAPP_HTTPS_PORT"] = strconv.Itoa(c.HTTPSPort)
+	}
+	if c.StateDir != p.StateDir() {
+		env["LOCALAPP_STATE_DIR"] = c.StateDir
+	}
+	if c.SocketPath != filepath.Join(c.StateDir, "control.sock") {
+		env["LOCALAPP_SOCKET"] = c.SocketPath
+	}
+	return env
+}
+
 // RegistryPath returns the path of the registry file.
 func (c Config) RegistryPath() string { return filepath.Join(c.StateDir, "registry.json") }
 

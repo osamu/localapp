@@ -121,7 +121,8 @@ Rules:
 - `/v1/` versioning: fields are never removed or repurposed; clients ignore
   unknown fields.
 - `PUT` / `DELETE` are idempotent. Concurrency: last-write-wins, serialized in
-  the daemon, atomic write to `registry.json`.
+  the daemon, atomic write to `registry.json`. In-memory changes are published
+  only after persistence succeeds; a failed write leaves the registry unchanged.
 - `LOCALAPP_SOCKET` overrides the socket path (tests, multiple instances).
 
 Resource model:
@@ -170,10 +171,15 @@ No config file. Defaults + environment variables only.
 
 Domain selection: `install --domain <name>` (overrides `LOCALAPP_DOMAIN`).
 Because launchd does not inherit environment variables, `install` persists
-non-default settings into the LaunchDaemon plist's `EnvironmentVariables`
-(systemd `Environment=` on Linux), and records the domain in `<state>/domain`
-so `uninstall` can find the resolver file without relying on the environment.
-Validation: dot-joined `[a-z0-9-]` labels; `local` / `localhost` and anything
+non-default settings, including an independently overridden `LOCALAPP_SOCKET`,
+into the LaunchDaemon plist's `EnvironmentVariables` (systemd `Environment=`
+on Linux). Configuration loading and environment serialization are both owned
+by `internal/config`. Install also records the domain in `<state>/domain` so
+`uninstall` can find the resolver file without relying on the environment.
+Validation is shared by the CA, DNS and resolver layers and runs before
+installation side effects: dot-joined `[a-z0-9-]` labels of 1–63 characters,
+without leading/trailing hyphens, and at most 253 characters overall.
+`local` / `localhost` and anything
 beneath them are rejected (mDNS / RFC 6761 — notably a 2-label apex like
 `dev.local` is captured by mDNS and the dashboard becomes unreachable).
 Changing the domain requires `uninstall` → `install` because the CA's Name
@@ -306,6 +312,11 @@ type Platform interface {
 | browser CA | Safari/Chrome: keychain; Firefox: manual | Chrome/Firefox: NSS, manual |
 
 ### State directory layout
+
+Uninstall stops the service before removing the resolver or CA trust. If
+stopping the service fails, dependent cleanup is skipped. Once stopped,
+resolver and trust removal are attempted independently; state is deleted only
+when both succeed, preserving the domain record and certificate for retries.
 
 ```
 registry.json      registry (hand-editable while the daemon is stopped)

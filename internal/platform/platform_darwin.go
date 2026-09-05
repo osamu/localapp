@@ -13,16 +13,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	domainname "github.com/osamu/localapp/internal/domain"
 )
 
 // Write targets on macOS. All of them are fixed paths and never concatenate
 // user input (DESIGN.md "Security", install / uninstall rows). The only
 // exception is the domain in the resolver file name, whose format is validated
-// by validDomain.
+// by the shared domain validator.
 const (
 	defaultResolverDir = "/etc/resolver"
 	defaultPlistPath   = "/Library/LaunchDaemons/dev.localapp.plist"
@@ -33,10 +34,6 @@ const (
 	// serviceTarget is the launchctl service target (system domain).
 	serviceTarget = "system/" + serviceLabel
 )
-
-// validDomain is the accepted format for a domain used as a resolver file
-// name. It rejects values containing path separators or `..`.
-var validDomain = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`)
 
 // darwinPlatform is the macOS implementation.
 //
@@ -187,8 +184,8 @@ func OpenURL(url string) error {
 // resolverPath builds the path of the resolver file. It accepts only domains
 // that pass format validation.
 func (p darwinPlatform) resolverPath(domain string) (string, error) {
-	if !validDomain.MatchString(domain) {
-		return "", fmt.Errorf("invalid resolver domain: %q", domain)
+	if err := domainname.Validate(domain); err != nil {
+		return "", fmt.Errorf("invalid resolver domain: %w", err)
 	}
 	return filepath.Join(p.resolverDir, domain), nil
 }

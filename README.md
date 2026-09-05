@@ -56,6 +56,9 @@ sudo localapp install --domain dev.test    # or pick your own domain
 `local`, `localhost`, and anything beneath them are rejected as domains
 (reserved by mDNS / RFC 6761). To change the domain later, run
 `sudo localapp uninstall` and reinstall with `--domain`.
+Domains use lowercase letters, digits and hyphens, with dots between labels.
+Each label must be 1–63 characters with no leading or trailing hyphen; the
+whole domain must be at most 253 characters.
 
 ### Security model
 
@@ -176,7 +179,9 @@ sudo localapp uninstall
 ```
 
 Removes the resolver entry, CA trust registration, launchd service, and all
-state.
+state. If stopping the service fails, further cleanup is skipped. If removing
+the resolver or CA trust fails, state is retained so you can fix the reported
+error and retry the same command.
 
 ## Environment variables
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	domainname "github.com/osamu/localapp/internal/domain"
 )
 
 // DefaultTTL is the TTL of answer records. It is kept short so that dev servers
@@ -42,18 +43,8 @@ type Server struct {
 // An empty string or a value violating the label format is an error (so that a
 // misconfiguration cannot make it answer for the whole root zone).
 func New(domain string) (*Server, error) {
-	if domain == "" {
-		return nil, errors.New("the domain is empty")
-	}
-	for _, label := range strings.Split(domain, ".") {
-		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return nil, fmt.Errorf("domain %q is not a sequence of [a-z0-9-] labels", domain)
-		}
-		for _, r := range label {
-			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
-				return nil, fmt.Errorf("domain %q is not a sequence of [a-z0-9-] labels", domain)
-			}
-		}
+	if err := domainname.Validate(domain); err != nil {
+		return nil, err
 	}
 	return &Server{domain: dns.Fqdn(domain), ttl: uint32(DefaultTTL / time.Second)}, nil
 }

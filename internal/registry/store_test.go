@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
@@ -266,6 +267,105 @@ func TestConcurrentPut(t *testing.T) {
 	}
 	if apps, _ := reopened.Counts(); apps != n {
 		t.Errorf("apps after re-Open = %d, want %d", apps, n)
+	}
+}
+
+func TestFailedPersistencePreservesRegistry(t *testing.T) {
+	tests := []struct {
+		name    string
+		app     string
+		service string
+		put     *Service
+	}{
+		{name: "new app", app: "new-app", put: &Service{Name: "web", Port: 3000}},
+		{name: "new service", app: "alpha", put: &Service{Name: "worker", Port: 3000}},
+		{name: "replace service", app: "alpha", put: &Service{Name: "api", Port: 9000}},
+		{name: "remove app", app: "alpha"},
+		{name: "remove service", app: "alpha", service: "api"},
+		{name: "remove last service", app: "zebra", service: "web"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, path := newStore(t)
+			mustPut(t, s, "alpha", Service{Name: "api", Port: 8000})
+			mustPut(t, s, "alpha", Service{Name: "web", Port: 5173})
+			mustPut(t, s, "zebra", Service{Name: "web", Port: 8080})
+			before := s.Apps()
+			beforeData, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// A directory at the destination forces rename to fail even when
+			// tests run as root, after the temporary file has been written.
+			backup := path + ".backup"
+			if err := os.Rename(path, backup); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(path, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			mutate := func() error {
+				if tt.put != nil {
+					got, err := s.Put(tt.app, *tt.put)
+					if err != nil && got != (Service{}) {
+						t.Errorf("failed Put returned service: %+v", got)
+					}
+					return err
+				}
+				var removed bool
+				var err error
+				if tt.service != "" {
+					removed, err = s.RemoveService(tt.app, tt.service)
+				} else {
+					removed, err = s.RemoveApp(tt.app)
+				}
+				if removed != (err == nil) {
+					t.Errorf("removal = (%v, %v), want removed only on success", removed, err)
+				}
+				return err
+			}
+			if err := mutate(); err == nil {
+				t.Fatal("mutation succeeded with unwritable destination")
+			}
+			if got := s.Apps(); !reflect.DeepEqual(got, before) {
+				t.Fatalf("failed mutation changed memory: got %+v, want %+v", got, before)
+			}
+			if data, err := os.ReadFile(backup); err != nil || string(data) != string(beforeData) {
+				t.Fatalf("failed mutation changed persisted data: %s, error %v", data, err)
+			}
+			if temps, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".registry-*.json")); err != nil || len(temps) != 0 {
+				t.Fatalf("temporary files after failure = %v, error %v", temps, err)
+			}
+
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(backup, path); err != nil {
+				t.Fatal(err)
+			}
+			// A later successful write must not silently persist the failed edit.
+			mustPut(t, s, "other", Service{Name: "web", Port: 4000})
+			want := append(cloneApps(before), App{Name: "other", Services: []Service{{Name: "web", Port: 4000}}})
+			sortApps(want)
+			reopened, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := reopened.Apps(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("later write leaked failed mutation: got %+v, want %+v", got, want)
+			}
+			if err := mutate(); err != nil {
+				t.Fatalf("retry after recovery: %v", err)
+			}
+			reopened, err = Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(reopened.Apps(), s.Apps()) || reflect.DeepEqual(s.Apps(), want) {
+				t.Fatal("retry did not commit the mutation to both memory and disk")
+			}
+		})
 	}
 }
 

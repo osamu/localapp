@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/osamu/localapp/internal/platform"
@@ -97,5 +98,60 @@ func TestListenersBindLoopbackOnly(t *testing.T) {
 		if len(addr) < 10 || addr[:10] != "127.0.0.1:" {
 			t.Errorf("listener %s = %q, want a 127.0.0.1 bind", name, addr)
 		}
+	}
+}
+
+// Service-manager serialization must recreate the complete configuration in a
+// fresh environment, including custom sockets outside the state directory.
+func TestNonDefaultEnvRoundTrip(t *testing.T) {
+	p := platform.Current()
+	keys := []string{"LOCALAPP_DOMAIN", "LOCALAPP_DNS_PORT", "LOCALAPP_HTTP_PORT", "LOCALAPP_HTTPS_PORT", "LOCALAPP_STATE_DIR", "LOCALAPP_SOCKET"}
+	for _, key := range keys {
+		t.Setenv(key, "")
+	}
+	defaults := Load(p)
+	tests := []struct {
+		name   string
+		change func(*Config)
+		want   map[string]string
+	}{
+		{"defaults", func(c *Config) {}, map[string]string{}},
+		{"domain", func(c *Config) { c.Domain = "dev.test" }, map[string]string{"LOCALAPP_DOMAIN": "dev.test"}},
+		{"dns", func(c *Config) { c.DNSPort = 25353 }, map[string]string{"LOCALAPP_DNS_PORT": "25353"}},
+		{"http", func(c *Config) { c.HTTPPort = 18080 }, map[string]string{"LOCALAPP_HTTP_PORT": "18080"}},
+		{"https", func(c *Config) { c.HTTPSPort = 18443 }, map[string]string{"LOCALAPP_HTTPS_PORT": "18443"}},
+		{"state with derived socket", func(c *Config) {
+			c.StateDir = "/tmp/custom-state"
+			c.SocketPath = filepath.Join(c.StateDir, "control.sock")
+		}, map[string]string{"LOCALAPP_STATE_DIR": "/tmp/custom-state"}},
+		{"independent socket", func(c *Config) { c.SocketPath = "/tmp/custom.sock" }, map[string]string{"LOCALAPP_SOCKET": "/tmp/custom.sock"}},
+		{"all overrides", func(c *Config) {
+			c.Domain = "dev.test"
+			c.DNSPort, c.HTTPPort, c.HTTPSPort = 25353, 18080, 18443
+			c.StateDir, c.SocketPath = "/tmp/custom-state", "/tmp/custom.sock"
+		}, map[string]string{
+			"LOCALAPP_DOMAIN": "dev.test", "LOCALAPP_DNS_PORT": "25353",
+			"LOCALAPP_HTTP_PORT": "18080", "LOCALAPP_HTTPS_PORT": "18443",
+			"LOCALAPP_STATE_DIR": "/tmp/custom-state", "LOCALAPP_SOCKET": "/tmp/custom.sock",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := defaults
+			tt.change(&cfg)
+			env := cfg.NonDefaultEnv(p)
+			if !reflect.DeepEqual(env, tt.want) {
+				t.Fatalf("environment = %v, want %v", env, tt.want)
+			}
+			for _, key := range keys {
+				t.Setenv(key, "")
+			}
+			for key, value := range env {
+				t.Setenv(key, value)
+			}
+			if got := Load(p); got != cfg {
+				t.Errorf("round trip = %+v, want %+v", got, cfg)
+			}
+		})
 	}
 }
