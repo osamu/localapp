@@ -13,7 +13,7 @@ func TestValidateDomain(t *testing.T) {
 			t.Errorf("ValidateDomain(%q) = %v, want nil", d, err)
 		}
 	}
-	ng := []string{"", ".", ".localapp", "localapp.", "Localapp", "local app", "loc/app", "..", strings.Repeat("a", 64)}
+	ng := []string{"", "-dev", "dev-", "a.-dev", "dev-.test", ".", ".localapp", "localapp.", "Localapp", "local app", "loc/app", "..", strings.Repeat("a", 64)}
 	for _, d := range ng {
 		err := ValidateDomain(d)
 		if err == nil {

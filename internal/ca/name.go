@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/osamu/localapp/internal/domain"
 )
 
 // ErrInvalidHost reports that an SNI / host name is not a valid name under the
@@ -18,19 +20,11 @@ const (
 	maxLabelLen = 63
 )
 
-// ValidateDomain verifies that the configured domain is a dot-joined sequence
-// of `[a-z0-9-]` labels.
-func ValidateDomain(domain string) error {
-	if domain == "" {
-		return fmt.Errorf("%w: empty domain", ErrInvalidHost)
-	}
-	if len(domain) > maxHostLen {
-		return fmt.Errorf("%w: domain too long (%d characters)", ErrInvalidHost, len(domain))
-	}
-	for _, label := range strings.Split(domain, ".") {
-		if err := validateLabel(label); err != nil {
-			return fmt.Errorf("%w: domain %q: %s", ErrInvalidHost, domain, err)
-		}
+// ValidateDomain verifies the shared configured-domain format, preserving the
+// CA error classification used by callers.
+func ValidateDomain(name string) error {
+	if err := domain.Validate(name); err != nil {
+		return fmt.Errorf("%w: %s", ErrInvalidHost, err)
 	}
 	return nil
 }

@@ -146,21 +146,8 @@ func TestReservedDomains(t *testing.T) {
 	}
 }
 
-// Only non-default settings appear in the environment variable map.
-func TestNonDefaultEnv(t *testing.T) {
-	cfg := loadConfig()
-	if len(nonDefaultEnv(cfg)) != 0 && os.Getenv("LOCALAPP_STATE_DIR") == "" {
-		t.Skip("the test environment already sets these environment variables")
-	}
-	cfg.Domain = "myorg"
-	cfg.DNSPort = 5300
-	env := nonDefaultEnv(cfg)
-	if env["LOCALAPP_DOMAIN"] != "myorg" || env["LOCALAPP_DNS_PORT"] != "5300" {
-		t.Errorf("nonDefaultEnv = %v", env)
-	}
-	if _, ok := env["LOCALAPP_HTTP_PORT"]; ok {
-		t.Error("the default HTTP port is present")
-	}
+func TestFormatEnv(t *testing.T) {
+	env := map[string]string{"LOCALAPP_DOMAIN": "myorg", "LOCALAPP_DNS_PORT": "5300"}
 	if got := formatEnv(env); got != "LOCALAPP_DNS_PORT=5300 LOCALAPP_DOMAIN=myorg" {
 		t.Errorf("formatEnv = %q", got)
 	}

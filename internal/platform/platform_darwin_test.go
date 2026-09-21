@@ -96,7 +96,7 @@ func TestInstallResolverWritesNameserverAndPort(t *testing.T) {
 // rejected (DESIGN.md "Security", install / uninstall rows).
 func TestResolverPathRejectsTraversal(t *testing.T) {
 	p, _ := newTestPlatform(t)
-	for _, domain := range []string{"../etc/passwd", "a/b", "..", "", "local app", "localapp/", "-bad", "l..ocal/../x"} {
+	for _, domain := range []string{"../etc/passwd", "a/b", "..", "", "local app", "localapp/", "-bad", "l..ocal/../x", "bad-", "a.-dev", "dev-.test", strings.Repeat("a", 64), strings.Repeat(strings.Repeat("a", 63)+".", 3) + strings.Repeat("a", 62)} {
 		if _, err := p.resolverPath(domain); err == nil {
 			t.Errorf("domain %q was accepted", domain)
 		}

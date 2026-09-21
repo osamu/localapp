@@ -42,7 +42,7 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("parsing registry.json (%s): %w", path, err)
 	}
 	s.apps = f.Apps
-	s.sortLocked()
+	sortApps(s.apps)
 	return s, nil
 }
 
@@ -88,24 +88,24 @@ func (s *Store) Put(app string, svc Service) (Service, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	apps := cloneApps(s.apps)
 	i := s.indexLocked(app)
 	if i < 0 {
-		s.apps = append(s.apps, App{Name: app, Services: []Service{svc}})
+		apps = append(apps, App{Name: app, Services: []Service{svc}})
 	} else {
 		replaced := false
-		for j := range s.apps[i].Services {
-			if s.apps[i].Services[j].Name == svc.Name {
-				s.apps[i].Services[j] = svc
+		for j := range apps[i].Services {
+			if apps[i].Services[j].Name == svc.Name {
+				apps[i].Services[j] = svc
 				replaced = true
 				break
 			}
 		}
 		if !replaced {
-			s.apps[i].Services = append(s.apps[i].Services, svc)
+			apps[i].Services = append(apps[i].Services, svc)
 		}
 	}
-	s.sortLocked()
-	if err := s.saveLocked(); err != nil {
+	if err := s.commitLocked(apps); err != nil {
 		return Service{}, err
 	}
 	return svc, nil
@@ -120,8 +120,9 @@ func (s *Store) RemoveApp(app string) (bool, error) {
 	if i < 0 {
 		return false, nil
 	}
-	s.apps = append(s.apps[:i], s.apps[i+1:]...)
-	if err := s.saveLocked(); err != nil {
+	apps := cloneApps(s.apps)
+	apps = append(apps[:i], apps[i+1:]...)
+	if err := s.commitLocked(apps); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -142,11 +143,13 @@ func (s *Store) RemoveService(app, service string) (bool, error) {
 		if svcs[j].Name != service {
 			continue
 		}
-		s.apps[i].Services = append(svcs[:j], svcs[j+1:]...)
-		if len(s.apps[i].Services) == 0 {
-			s.apps = append(s.apps[:i], s.apps[i+1:]...)
+		apps := cloneApps(s.apps)
+		svcs := apps[i].Services
+		apps[i].Services = append(svcs[:j], svcs[j+1:]...)
+		if len(apps[i].Services) == 0 {
+			apps = append(apps[:i], apps[i+1:]...)
 		}
-		if err := s.saveLocked(); err != nil {
+		if err := s.commitLocked(apps); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -163,20 +166,30 @@ func (s *Store) indexLocked(name string) int {
 	return -1
 }
 
-func (s *Store) sortLocked() {
-	sort.Slice(s.apps, func(i, j int) bool { return s.apps[i].Name < s.apps[j].Name })
-	for i := range s.apps {
-		svcs := s.apps[i].Services
+func sortApps(apps []App) {
+	sort.Slice(apps, func(i, j int) bool { return apps[i].Name < apps[j].Name })
+	for i := range apps {
+		svcs := apps[i].Services
 		sort.Slice(svcs, func(a, b int) bool { return svcs[a].Name < svcs[b].Name })
 	}
 }
 
+// commitLocked publishes a private candidate only after persistence succeeds.
+// The caller must hold the write lock throughout the update and commit.
+func (s *Store) commitLocked(apps []App) error {
+	sortApps(apps)
+	if err := s.saveLocked(apps); err != nil {
+		return err
+	}
+	s.apps = apps
+	return nil
+}
+
 // saveLocked writes registry.json atomically (temp file + rename).
-func (s *Store) saveLocked() error {
+func (s *Store) saveLocked(apps []App) error {
 	if s.path == "" {
 		return nil
 	}
-	apps := s.apps
 	if apps == nil {
 		apps = []App{}
 	}

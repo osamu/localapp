@@ -77,7 +77,7 @@ func cmdInstall(args []string) int {
 	if err != nil {
 		return reportError(fmt.Errorf("getting the executable path: %w", err))
 	}
-	daemonEnv := nonDefaultEnv(cfg)
+	daemonEnv := cfg.NonDefaultEnv(p)
 
 	// 1. The state directory. Make it traversable so the CLI can reach
 	// control.sock.
@@ -142,8 +142,8 @@ func cmdInstall(args []string) int {
 	return exitOK
 }
 
-// cmdUninstall removes everything install created. It does not stop at an
-// individual failure: it removes as much as it can and then reports.
+// cmdUninstall removes everything install created, preserving state needed to
+// retry cleanup if stopping the service or removing OS configuration fails.
 func cmdUninstall(args []string) int {
 	fs := newFlagSet("uninstall")
 	fs.Usage = func() {
@@ -165,37 +165,52 @@ func cmdUninstall(args []string) int {
 		return exitError
 	}
 
-	cfg := loadConfig()
+	if err := uninstall(loadConfig(), platform.Current(), errf); err != nil {
+		return reportError(err)
+	}
+	errf("done")
+	return exitOK
+}
+
+// uninstallPlatform is the subset of OS operations needed for cleanup.
+type uninstallPlatform interface {
+	UninstallService() error
+	UninstallResolver(string) error
+	UninstallTrust(string) error
+}
+
+// uninstall keeps the state directory until all dependent OS cleanup succeeds.
+// The platform and progress output are supplied by the caller so partial
+// failures can be tested without root or changes to the host configuration.
+func uninstall(cfg config.Config, p uninstallPlatform, report func(string, ...any)) error {
 	// With install --domain the domain never appears in the environment, so the
 	// recorded value wins.
 	if domain, ok := readDomainRecord(cfg.StateDir); ok {
 		cfg.Domain = domain
 	}
-	p := platform.Current()
 	var failed []error
 
-	step := func(label string, fn func() error) {
+	step := func(label string, fn func() error) bool {
 		if err := fn(); err != nil {
-			errf("%s: %v", label, err)
-			failed = append(failed, err)
-			return
+			failed = append(failed, fmt.Errorf("%s: %w", label, err))
+			return false
 		}
-		errf("%s: removed", label)
+		report("%s: removed", label)
+		return true
 	}
 
 	// Service, then resolver, then trust, then the state directory. The daemon
 	// is stopped first.
-	step("service", p.UninstallService)
+	if !step("service", p.UninstallService) {
+		return fmt.Errorf("cleanup skipped; state preserved for retry: %w", errors.Join(failed...))
+	}
 	step("resolver", func() error { return p.UninstallResolver(cfg.Domain) })
 	step("trust store", func() error { return p.UninstallTrust(ca.CertPath(cfg.CADir())) })
-	step("state directory ("+cfg.StateDir+")", func() error { return os.RemoveAll(cfg.StateDir) })
-
 	if len(failed) > 0 {
-		errf("%d step(s) could not be removed", len(failed))
-		return exitError
+		return fmt.Errorf("state preserved for retry: %w", errors.Join(failed...))
 	}
-	errf("done")
-	return exitOK
+	step("state directory ("+cfg.StateDir+")", func() error { return os.RemoveAll(cfg.StateDir) })
+	return errors.Join(failed...)
 }
 
 // cmdCA handles `localapp ca path`.
@@ -211,30 +226,6 @@ func cmdCA(args []string) int {
 	}
 	fmt.Println(path)
 	return exitOK
-}
-
-// nonDefaultEnv returns the settings that differ from the defaults as an
-// environment variable map. launchd does not inherit the caller's environment,
-// so install persists these as the plist EnvironmentVariables to keep the
-// daemon's configuration in sync.
-func nonDefaultEnv(cfg config.Config) map[string]string {
-	env := map[string]string{}
-	if cfg.Domain != config.DefaultDomain {
-		env["LOCALAPP_DOMAIN"] = cfg.Domain
-	}
-	if cfg.DNSPort != config.DefaultDNSPort {
-		env["LOCALAPP_DNS_PORT"] = strconv.Itoa(cfg.DNSPort)
-	}
-	if cfg.HTTPPort != config.DefaultHTTPPort {
-		env["LOCALAPP_HTTP_PORT"] = strconv.Itoa(cfg.HTTPPort)
-	}
-	if cfg.HTTPSPort != config.DefaultHTTPSPort {
-		env["LOCALAPP_HTTPS_PORT"] = strconv.Itoa(cfg.HTTPSPort)
-	}
-	if cfg.StateDir != platform.Current().StateDir() {
-		env["LOCALAPP_STATE_DIR"] = cfg.StateDir
-	}
-	return env
 }
 
 // formatEnv formats an environment variable map as "K=V K=V", keys ascending.
