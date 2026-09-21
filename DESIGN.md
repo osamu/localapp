@@ -273,7 +273,7 @@ other users on a multi-user machine. Trusted: same-user processes
 | CA key | leak → arbitrary MITM | critical Name Constraints on the CA itself; key `0600` root; code-level issuance guard |
 | Listeners | LAN hosts reaching localhost-only dev servers through the proxy | everything binds `127.0.0.1` |
 | SNI | crafted SNI → path traversal via cert-cache filenames | validate before use; reject at handshake |
-| Control plane | CSRF from the browser | mutating endpoints exist only on the Unix socket; dashboard is read-only |
+| Control plane | CSRF from the browser | general mutating endpoints exist only on the Unix socket; the dashboard exposes only service deletion, behind a confirmation page and a per-daemon CSRF token |
 | Registered values | XSS in error pages / dashboard | server-side name validation + `html/template` escaping |
 | root daemon (macOS) | parsing network input as root | deps limited to stdlib + `miekg/dns`; non-root via launchd socket activation is a future option; Linux runs non-root via `CAP_NET_BIND_SERVICE` |
 | install/uninstall | root writes | fixed paths only, no user input in paths; uninstall removes everything incl. trust |
