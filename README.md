@@ -65,7 +65,8 @@ daemon), so the design keeps the blast radius small:
 - The root CA carries a **critical X.509 Name Constraints** extension limited
   to your dev domain. Even a leaked CA key cannot MITM any real website.
 - All listeners bind to `127.0.0.1` only.
-- Mutating APIs live on a `0600` Unix socket; the HTTPS side is read-only.
+- Mutating APIs live on a `0600` Unix socket. The dashboard exposes only
+  confirmed mapping deletion, protected by a per-daemon CSRF token.
 - `sudo localapp uninstall` removes everything, including the CA trust.
 
 Details in [SECURITY.md](SECURITY.md) and [DESIGN.md](DESIGN.md).

@@ -12,9 +12,10 @@ design seriously.
   for any other domain will fail browser verification.
 - **Loopback only**: all listeners (DNS, HTTP, HTTPS) bind to `127.0.0.1`.
   Nothing is exposed to the network.
-- **Unix-socket control plane**: all mutating API endpoints exist only on a
-  local Unix socket owned by the installing user (`0600`). The HTTPS listener
-  serves a read-only dashboard.
+- **Unix-socket control plane**: all general mutating API endpoints exist only
+  on a local Unix socket owned by the installing user (`0600`). The dashboard
+  exposes only confirmed service-mapping deletion, protected by a random
+  per-daemon CSRF token.
 - **SNI validation**: hostnames are validated before certificate issuance and
   before any filesystem use (path-traversal safe).
 - **Clean uninstall**: `sudo localapp uninstall` removes the resolver entry,

@@ -29,7 +29,7 @@ internal/control/    Control Plane API (HTTP+JSON over Unix socket) + client
 internal/proxy/      reverse proxy: routing, WS passthrough, liveness error pages
 internal/dnsd/       DNS server (miekg/dns — the only external dependency)
 internal/ca/         root CA (Name Constraints) + on-demand SNI issuance
-internal/dashboard/  apex page (html/template, read-only)
+internal/dashboard/  apex page (html/template, listing + mapping deletion)
 internal/scan/       unregistered listening-port detection
 internal/skill/      SKILL.md embedding and placement (claude / codex)
 internal/platform/   OS-specific layer; core packages never import it
@@ -74,7 +74,7 @@ release. `install.sh` is the checksum-verified curl installer.
   - certificate issuance only within the configured domain (CA Name
     Constraints + code guard, both tested)
   - SNI validated before issuance/caching (path-traversal tests required)
-  - mutating APIs on the Unix socket only; dashboard read-only
+  - mutating APIs on the Unix socket only; dashboard deletion requires its CSRF token
   - domains under `local` / `localhost` rejected
 
 ## Consistency rule
