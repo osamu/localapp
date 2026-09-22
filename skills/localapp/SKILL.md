@@ -175,3 +175,24 @@ for `<domain>`.
 | The app generates `http://` URLs | configure it to honor `X-Forwarded-Proto: https` |
 | Node / curl report a certificate error | `NODE_EXTRA_CA_CERTS=$(localapp ca path)` / `SSL_CERT_FILE=$(localapp ca path)` |
 | Certificate error in the browser (Firefox only) | Firefox has its own trust store; tell the user to add the CA manually |
+
+## Web log preview
+
+The dashboard's Logs link previews combined stdout/stderr from `localapp run`,
+with one-second updates, pause/resume, and auto-scroll. Use this form when the
+user needs Web logs:
+
+```sh
+localapp run --app <app> --service <service> -- <command> [args...]
+```
+
+`localapp add` registers a port and optional PID only. It cannot attach to an
+existing process's stdout/stderr, so an app registered with `add` has no Web log
+stream. Do not claim that PID registration captures logs, and do not suggest a
+log-push or pipe command: localapp does not currently provide one. If Web logs
+are required, explain that the process must be restarted with `localapp run`.
+
+History is in memory (the last 5 minutes by receipt time, up to 256 KiB per
+service and 64 services) and clears on daemon restart. Use the configured domain
+from API URLs; do not assume the default domain. `localapp logs` remains the
+daemon's own log and does not contain application output.

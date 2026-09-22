@@ -361,4 +361,25 @@ decision branch is whether to path-mount a backend.
 Not implemented, deliberately not precluded: registry hand-edit + fsnotify
 reload; `GET /v1/events` (SSE) for live dashboard / `ls --watch`; launchd
 socket activation (non-root macOS); per-project `.localapp.json`; HTTP/3 and
-gRPC passthrough. The dashboard stays plain HTML.
+gRPC passthrough. The dashboard uses server-rendered HTML with a small script for log preview.
+
+### Web log preview
+
+The apex dashboard links each service to `/logs?app=<app>&service=<service>`.
+`localapp run` tees stdout/stderr to a bounded, asynchronous queue and uploads
+batches over the existing private Unix socket (`POST /v1/apps/{app}/services/{service}/logs`).
+The JSON `text` field contains base64-encoded bytes to preserve UTF-8 characters
+that span upload boundaries.
+Output remains visible in the terminal; slow/unavailable log upload never blocks
+child output. Overflow is reported in the preview. The daemon retains up to
+the last 5 minutes (by daemon receipt time), capped at 256 KiB per service
+for at most 64 recently active services in memory; restart
+clears history. Logs are not persisted or inferred from arbitrary file paths.
+The browser polls a read-only snapshot once per second, with pause/resume and
+auto-scroll controls. Log contents are rendered as text, never HTML. Registration
+is required for uploads and reads. `add` cannot capture an existing process's
+stdout/stderr; its preview explains how to use `run`. The daemon log CLI is unchanged.
+
+Log batches expire five minutes after daemon receipt. Reads prune expired output
+even for idle services. The browser also expires cached batches every second,
+including while paused or disconnected, so old output does not remain on screen.

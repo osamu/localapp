@@ -197,6 +197,30 @@ daemon's launchd configuration.
 | `LOCALAPP_STATE_DIR` | `/usr/local/var/localapp` |
 | `LOCALAPP_SOCKET` | `<state>/control.sock` |
 
+## Web log preview
+
+Open the dashboard at your configured domain and select **Logs** beside a
+service. Commands started with `localapp run` stream combined stdout/stderr to
+the preview while still printing to the terminal. The page updates every second
+and offers pause/resume and auto-scroll.
+
+```sh
+localapp run --app myapp -- npm run dev
+```
+
+`localapp add` registers only the target port and optional PID. It cannot attach
+to an already running process's stdout/stderr, so services registered with
+`localapp add` do not produce a Web log stream. Restart the process with
+`localapp run` when Web logs are needed. There is currently no command for
+piping a log file or another process's output into localapp.
+
+The daemon keeps only the last 5 minutes of output (by receipt time), capped at
+256 KiB per service for up to 64 recently active
+services in memory. History disappears on daemon restart; output may be omitted
+if uploads fall behind (a marker appears). The child sees pipes instead of a
+terminal, so some commands may buffer output or disable color. `localapp logs`
+continues to show the daemon's own log.
+
 ## License
 
 [MIT](LICENSE)

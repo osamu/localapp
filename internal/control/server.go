@@ -14,11 +14,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/osamu/localapp/internal/logstream"
 	"github.com/osamu/localapp/internal/registry"
 )
 
 // Options configures a Server.
 type Options struct {
+	Logs *logstream.Store
 	// Domain is the domain suffix (used to derive URLs).
 	Domain string
 	// Version is the version reported by GET /v1/status.
@@ -35,6 +37,7 @@ type Options struct {
 
 // Server is the HTTP handler of the Control Plane API.
 type Server struct {
+	logs      *logstream.Store
 	store     *registry.Store
 	domain    string
 	version   string
@@ -47,6 +50,7 @@ type Server struct {
 func NewServer(store *registry.Store, opts Options) *Server {
 	s := &Server{
 		store:     store,
+		logs:      opts.Logs,
 		domain:    opts.Domain,
 		version:   opts.Version,
 		listeners: opts.Listeners,
@@ -120,6 +124,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := splitPath(r.URL.Path)
 
 	switch {
+	case len(parts) == 6 && parts[0] == APIVersion && parts[1] == "apps" && parts[3] == "services" && parts[5] == "logs":
+		if !allow(w, r, http.MethodPost) {
+			return
+		}
+		a, ok := s.store.App(parts[2])
+		_, found := a.Service(parts[4])
+		if !ok || !found || s.logs == nil {
+			writeError(w, 404, CodeNotFound, "log stream unavailable")
+			return
+		}
+		var req struct {
+			Text []byte `json:"text"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, 400, CodeBadJSON, "invalid log batch")
+			return
+		}
+		s.logs.Append(parts[2], parts[4], string(req.Text))
+		w.WriteHeader(http.StatusNoContent)
 	case len(parts) == 2 && parts[0] == APIVersion && parts[1] == "status":
 		if !allow(w, r, http.MethodGet) {
 			return

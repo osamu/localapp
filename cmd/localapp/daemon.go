@@ -21,6 +21,7 @@ import (
 	"github.com/osamu/localapp/internal/control"
 	"github.com/osamu/localapp/internal/dashboard"
 	"github.com/osamu/localapp/internal/dnsd"
+	"github.com/osamu/localapp/internal/logstream"
 	"github.com/osamu/localapp/internal/proxy"
 	"github.com/osamu/localapp/internal/registry"
 )
@@ -152,7 +153,9 @@ func runDaemon(cfg config.Config, logger *log.Logger) error {
 	applyOwner(cfg, logger)
 
 	// --- Handlers ---
+	logs := &logstream.Store{}
 	dash := dashboard.New(store, dashboard.Options{
+		Logs:      logs,
 		Domain:    cfg.Domain,
 		Version:   config.Version,
 		Listeners: cfg.Listeners(),
@@ -163,6 +166,7 @@ func runDaemon(cfg config.Config, logger *log.Logger) error {
 		Dashboard: dash,
 	})
 	controlSrv := control.NewServer(store, control.Options{
+		Logs:      logs,
 		Domain:    cfg.Domain,
 		Version:   config.Version,
 		Listeners: cfg.Listeners(),

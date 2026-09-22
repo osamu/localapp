@@ -1,7 +1,7 @@
 // Package dashboard provides the listing page served at the apex
 // (`https://<domain>/`).
 //
-// It returns plain HTML only (no JS framework, no external assets). Registered
+// It uses server-rendered HTML and a small log preview script (no external assets). Registered
 // values are printed through the automatic escaping of `html/template`
 // (DESIGN.md "Security", the row about printing registered values).
 //
@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/osamu/localapp/internal/logstream"
 	"github.com/osamu/localapp/internal/registry"
 )
 
@@ -33,6 +34,7 @@ type Store interface {
 
 // Options configures a Handler.
 type Options struct {
+	Logs *logstream.Store
 	// Domain is the domain suffix (default "localapp").
 	Domain string
 	// Version is the daemon version to display.
@@ -47,6 +49,7 @@ type Options struct {
 
 // Handler is the http.Handler of the listing page.
 type Handler struct {
+	logs      *logstream.Store
 	store     Store
 	domain    string
 	version   string
@@ -59,6 +62,7 @@ type Handler struct {
 func New(store Store, opts Options) *Handler {
 	h := &Handler{
 		store:     store,
+		logs:      opts.Logs,
 		domain:    opts.Domain,
 		version:   opts.Version,
 		listeners: opts.Listeners,
@@ -84,6 +88,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		render(w, http.StatusOK, h.data())
+	case "/logs", "/logs/data":
+		h.serveLogs(w, r)
 	case "/delete":
 		switch r.Method {
 		case http.MethodGet, http.MethodHead:
@@ -97,7 +103,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		render(w, http.StatusNotFound, pageData{
 			Domain:  h.domain,
 			Heading: "No such page",
-			Message: "The dashboard serves / and /delete only.",
+			Message: "Return to the dashboard to find apps and logs.",
 			Hint:    "The page of each app is https://<app>." + h.domain + "/.",
 		})
 	}
@@ -223,6 +229,7 @@ type serviceView struct {
 	Up        bool
 	URLs      []string
 	DeleteURL string
+	LogsURL   string
 }
 
 type listenerView struct {
@@ -284,6 +291,7 @@ func (h *Handler) data() pageData {
 				Up:        status == registry.StatusUp,
 				URLs:      svc.URLs(a.Name, h.domain),
 				DeleteURL: deleteURL(a.Name, svc.Name),
+				LogsURL:   "/logs?" + url.Values{"app": {a.Name}, "service": {svc.Name}}.Encode(),
 			})
 		}
 		d.Apps = append(d.Apps, av)
@@ -377,7 +385,7 @@ var tmpl = template.Must(template.New("dashboard").Parse(`<!doctype html>
         <td><span class="status {{if .Up}}up{{else}}down{{end}}">{{.Status}}</span></td>
         <td class="mono">localhost:{{.Port}}{{if .Path}}<br>path {{.Path}}{{end}}{{if .PID}}<br>pid {{.PID}}{{end}}</td>
         <td><ul>{{range .URLs}}<li><a href="{{.}}">{{.}}</a></li>{{end}}</ul></td>
-        <td class="actions"><a class="delete" href="{{.DeleteURL}}">Delete</a></td>
+        <td class="actions"><a href="{{.LogsURL}}">Logs</a> · <a class="delete" href="{{.DeleteURL}}">Delete</a></td>
       </tr>
     {{end}}{{end}}
     </tbody>

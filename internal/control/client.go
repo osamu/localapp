@@ -171,3 +171,11 @@ func (c *Client) DeleteService(ctx context.Context, app, service string) error {
 	_, err := c.do(ctx, http.MethodDelete, "/v1/apps/"+app+"/services/"+service, nil)
 	return err
 }
+
+// AppendLogs uploads a batch of captured output through the private socket.
+func (c *Client) AppendLogs(ctx context.Context, app, service, text string) error {
+	_, err := c.do(ctx, http.MethodPost, "/v1/apps/"+app+"/services/"+service+"/logs", struct {
+		Text []byte `json:"text"`
+	}{[]byte(text)})
+	return err
+}
