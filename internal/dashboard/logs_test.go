@@ -51,7 +51,7 @@ func TestLogPreview(t *testing.T) {
 // sseReader reads one SSE event (event name, id, data) at a time.
 type sseReader struct{ r *bufio.Reader }
 
-func (s sseReader) next(t *testing.T) (event, id string, data logEvent) {
+func (s sseReader) next(t *testing.T) (event, id string, data logstream.Event) {
 	t.Helper()
 	for {
 		line, err := s.r.ReadString('\n')

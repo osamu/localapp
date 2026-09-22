@@ -210,19 +210,28 @@ localapp run --app myapp -- npm run dev
 
 `localapp add` registers only the target port and optional PID. It cannot attach
 to an already running process's stdout/stderr. For such services, pipe the
-output through `localapp tee`, which copies stdin to stdout and sends the same
-bytes to the Web log stream of the registered service:
+output through `localapp logforward`, which copies stdin to stdout and sends
+the same bytes to the log stream of the registered service:
 
 ```sh
 localapp add 5173 --app myapp
-npm run dev 2>&1 | localapp tee myapp            # service defaults to web
-docker compose logs -f 2>&1 | localapp tee myapp/api
-tail -f server.log | localapp tee myapp > /dev/null   # Web only
+npm run dev 2>&1 | localapp logforward myapp            # service defaults to web
+docker compose logs -f 2>&1 | localapp logforward myapp/api
+tail -f server.log | localapp logforward myapp > /dev/null   # Web only
 ```
 
-`tee` keeps copying even when the service is not registered or the daemon is
-down (it warns once on stderr), because exiting would break the pipe and stop
-the producer.
+`logforward` keeps copying even when the service is not registered or the
+daemon is down (it warns once on stderr), because exiting would break the pipe
+and stop the producer.
+
+The same log is readable from the terminal, which is how coding agents check a
+dev server's output without a browser:
+
+```sh
+localapp logcat myapp            # last 200 lines
+localapp logcat -f myapp/api     # follow
+localapp logcat -n 0 myapp       # the whole retained window
+```
 
 The daemon keeps only the last 1000 lines of output (up to 256 KiB) per service
 for up to 64 recently active services in memory. History disappears on daemon restart; output may be omitted

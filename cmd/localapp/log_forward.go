@@ -15,7 +15,7 @@ const forwardInterval = 300 * time.Millisecond
 
 // logForwarder queues bytes and forwards them to the daemon's log stream over the control socket. Write never waits on
 // the daemon, so a slow or absent daemon cannot stall the producer. Close
-// allows one bounded final send. It is shared by `run` and `tee`.
+// allows one bounded final send. It is shared by `run` and `logforward`.
 type logForwarder struct {
 	mu      sync.Mutex
 	pending []byte

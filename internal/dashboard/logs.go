@@ -5,18 +5,13 @@ import (
 	"encoding/json"
 	"html/template"
 	"net/http"
-	"strconv"
-	"time"
+
+	"github.com/osamu/localapp/internal/logstream"
 )
 
 // maxLogStreams bounds concurrent SSE readers; each holds a goroutine and a
 // one-slot wake channel while connected.
 const maxLogStreams = 32
-
-// logKeepAlive is the idle interval between SSE comment lines, which keep
-// intermediaries from timing the connection out and let the handler notice a
-// removed mapping.
-const logKeepAlive = 15 * time.Second
 
 func (h *Handler) serveLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -39,7 +34,7 @@ func (h *Handler) serveLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		if r.Method != http.MethodHead {
-			_ = json.NewEncoder(w).Encode(logEvent{Text: text, Captured: captured})
+			_ = json.NewEncoder(w).Encode(logstream.Event{Text: text, Captured: captured})
 		}
 		return
 	case "/logs/stream":
@@ -59,20 +54,10 @@ func (h *Handler) serveLogs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// logEvent is the JSON payload of /logs/data and of each SSE event.
-type logEvent struct {
-	Text     string `json:"text"`
-	Captured bool   `json:"captured"`
-}
-
-// streamLogs serves the log stream as Server-Sent Events (DESIGN.md "Web log
-// preview"). Events: "reset" carries the whole retained window and replaces
-// the client's view; "append" carries only new output; "gone" ends the stream
-// when the mapping is removed. Every event's id is the byte offset to resume
-// from, which EventSource sends back as Last-Event-ID on reconnect.
+// streamLogs serves /logs/stream. The mapping is checked every keep-alive so a
+// removed service ends the stream with a "gone" event.
 func (h *Handler) streamLogs(w http.ResponseWriter, r *http.Request, app, service string) {
-	flusher, ok := w.(http.Flusher)
-	if !ok || h.logs == nil {
+	if h.logs == nil {
 		http.Error(w, "streaming unsupported", http.StatusNotImplemented)
 		return
 	}
@@ -82,61 +67,7 @@ func (h *Handler) streamLogs(w http.ResponseWriter, r *http.Request, app, servic
 		return
 	}
 	defer h.streams.Add(-1)
-	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	if r.Method == http.MethodHead {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	offset, _ := strconv.ParseUint(r.Header.Get("Last-Event-ID"), 10, 64)
-	wake, cancel := h.logs.Subscribe(app, service)
-	defer cancel()
-
-	send := func(event string, id uint64, payload logEvent) bool {
-		data, _ := json.Marshal(payload) // one line: JSON escapes newlines
-		_, err := w.Write([]byte("event: " + event + "\nid: " + strconv.FormatUint(id, 10) + "\ndata: " + string(data) + "\n\n"))
-		flusher.Flush()
-		return err == nil
-	}
-	// The first event always resets so a fresh page starts from the
-	// retained window; on reconnect a valid Last-Event-ID yields a delta.
-	text, next, captured, reset := h.logs.ReadFrom(app, service, offset)
-	if offset == 0 {
-		reset = true
-	}
-	if !send(map[bool]string{true: "reset", false: "append"}[reset], next, logEvent{text, captured}) {
-		return
-	}
-	offset = next
-	keepAlive := time.NewTicker(logKeepAlive)
-	defer keepAlive.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-keepAlive.C:
-			if !h.mappingExists(app, service) {
-				send("gone", offset, logEvent{})
-				return
-			}
-			if _, err := w.Write([]byte(": keep-alive\n\n")); err != nil {
-				return
-			}
-			flusher.Flush()
-		case <-wake:
-			text, next, captured, reset := h.logs.ReadFrom(app, service, offset)
-			if text == "" && !reset {
-				continue
-			}
-			event := "append"
-			if reset {
-				event = "reset"
-			}
-			if !send(event, next, logEvent{text, captured}) {
-				return
-			}
-			offset = next
-		}
-	}
+	h.logs.ServeSSE(w, r, app, service, func() bool { return h.mappingExists(app, service) })
 }
 
 var logsTemplate = template.Must(template.New("logs").Parse(`<!doctype html>
@@ -152,7 +83,7 @@ pre { background: #111820; color: #e5edf5; padding: 1rem; height: 60vh; overflow
 </style></head><body><main>
 <a href="/">← Dashboard</a><h1>{{.App}}/{{.Service}} logs</h1>
 <div class="controls"><button id="pause" type="button">Pause</button><label><input id="scroll" type="checkbox" checked> Auto-scroll</label><span id="status" role="status">Connecting…</span></div>
-<p id="empty" hidden>No captured output yet. Start this service with <code>localapp run --app {{.App}} --service {{.Service}} -- &lt;command&gt;</code>, or pipe an already running process into it: <code>&lt;command&gt; 2&gt;&amp;1 | localapp tee {{.App}}/{{.Service}}</code>.</p>
+<p id="empty" hidden>No captured output yet. Start this service with <code>localapp run --app {{.App}} --service {{.Service}} -- &lt;command&gt;</code>, or pipe an already running process into it: <code>&lt;command&gt; 2&gt;&amp;1 | localapp logforward {{.App}}/{{.Service}}</code>.</p>
 <pre id="output" tabindex="0" aria-label="Application log output"></pre>
 <p class="hint">Live stream of combined stdout/stderr. Only the last 1000 lines (up to 256 KiB) are kept; history is held in memory and cleared when the daemon restarts. Up to 64 recently active services are retained.</p>
 <noscript>Enable JavaScript to preview live logs.</noscript>

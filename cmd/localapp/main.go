@@ -47,8 +47,10 @@ func run(args []string) int {
 		return cmdAdd(rest)
 	case "run":
 		return cmdRun(rest)
-	case "tee":
-		return cmdTee(rest)
+	case "logforward":
+		return cmdLogForward(rest)
+	case "logcat":
+		return cmdLogcat(rest)
 	case "rm":
 		return cmdRm(rest)
 	case "ls":
@@ -96,8 +98,9 @@ Commands:
   run [--] <cmd> [args...]  allocate a free port, inject it as PORT, register,
                         and run the command; capture output for Web Logs; exits with its status
                         --app --service --path --strip-path
-  tee [<app>[/<service>]]  copy stdin to stdout and send it to Web Logs of a
-                        registered service (<cmd> 2>&1 | localapp tee myapp)
+  logforward [<app>[/<service>]]  copy stdin to stdout and forward it to the
+                        log stream of a registered service (<cmd> 2>&1 | localapp logforward myapp)
+  logcat [-f] [-n lines] <app>[/<service>]  print the captured log of a service; -f follows
   rm <app>[/<service>]  remove a registration
   ls [--json]           list the registrations
   status [--json]       show daemon liveness, listeners and counts

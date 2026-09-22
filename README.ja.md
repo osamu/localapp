@@ -172,19 +172,28 @@ localapp run --app myapp -- npm run dev
 
 `localapp add` が登録するのは接続先ポートと、指定した場合の PID だけで、
 すでに動いているプロセスの標準出力・標準エラーには後から接続できない。
-このようなサービスでは、出力を `localapp tee` にパイプする。`tee` は標準入力を
-そのまま標準出力へ書き出しつつ、同じ内容を登録済みサービスの Web ログへ送る。
+このようなサービスでは、出力を `localapp logforward` にパイプする。`logforward` は
+標準入力をそのまま標準出力へ書き出しつつ、同じ内容を登録済みサービスのログへ送る。
 
 ```sh
 localapp add 5173 --app myapp
-npm run dev 2>&1 | localapp tee myapp            # service は既定で web
-docker compose logs -f 2>&1 | localapp tee myapp/api
-tail -f server.log | localapp tee myapp > /dev/null   # Web のみ
+npm run dev 2>&1 | localapp logforward myapp            # service は既定で web
+docker compose logs -f 2>&1 | localapp logforward myapp/api
+tail -f server.log | localapp logforward myapp > /dev/null   # Web のみ
 ```
 
-サービスが未登録、またはデーモンが停止している場合も `tee` は転送を続ける
+サービスが未登録、またはデーモンが停止している場合も `logforward` は転送を続ける
 （標準エラーに 1 回だけ警告する）。終了するとパイプが切れ、出力元のプロセスが
 停止するためである。
+
+同じログはターミナルからも読める。Coding Agent がブラウザなしで開発サーバの
+出力を確認する手段である。
+
+```sh
+localapp logcat myapp            # 直近 200 行
+localapp logcat -f myapp/api     # 追従
+localapp logcat -n 0 myapp       # 保持している全体
+```
 
 ログは各サービスの直近1000行（最大256 KiB）を、最大64サービス分メモリに保持し、
 デーモン再起動時に消去する。送信が追いつかない場合は省略の通知を表示する。

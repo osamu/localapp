@@ -85,14 +85,14 @@ func TestLogForwarderWarnsOnceAndOnRecovery(t *testing.T) {
 	}
 }
 
-func TestTeePassesThroughAndForwards(t *testing.T) {
+func TestLogForwardPassesThroughAndForwards(t *testing.T) {
 	store, logs := startLogDaemon(t)
 	if _, err := store.Put("piped", registry.Service{Name: "api", Port: 65002}); err != nil {
 		t.Fatal(err)
 	}
 	input := "plain\n\x00\xff binary あ\n" + strings.Repeat("y", 5000) // includes invalid UTF-8 and a NUL
 	var out bytes.Buffer
-	if code := teeStdin("piped", "api", strings.NewReader(input), &out); code != exitOK {
+	if code := forwardStdin("piped", "api", strings.NewReader(input), &out); code != exitOK {
 		t.Fatalf("exit=%d", code)
 	}
 	if out.String() != input {
@@ -104,7 +104,7 @@ func TestTeePassesThroughAndForwards(t *testing.T) {
 	}
 }
 
-func TestTeeKeepsFlowingWhenUnregistered(t *testing.T) {
+func TestLogForwardKeepsFlowingWhenUnregistered(t *testing.T) {
 	startLogDaemon(t)
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -113,7 +113,7 @@ func TestTeeKeepsFlowingWhenUnregistered(t *testing.T) {
 	stderr := os.Stderr
 	os.Stderr = w
 	var out bytes.Buffer
-	code := teeStdin("nobody", "web", strings.NewReader("a\nb\n"), &out)
+	code := forwardStdin("nobody", "web", strings.NewReader("a\nb\n"), &out)
 	os.Stderr = stderr
 	w.Close()
 	var diag bytes.Buffer
@@ -126,9 +126,9 @@ func TestTeeKeepsFlowingWhenUnregistered(t *testing.T) {
 	}
 }
 
-func TestTeeUsage(t *testing.T) {
+func TestLogForwardUsage(t *testing.T) {
 	for _, args := range [][]string{{"a", "b"}, {"/web"}, {"app/"}, {"app/x/y"}} {
-		if code := cmdTee(args); code != exitUsage {
+		if code := cmdLogForward(args); code != exitUsage {
 			t.Fatalf("%v: exit=%d", args, code)
 		}
 	}

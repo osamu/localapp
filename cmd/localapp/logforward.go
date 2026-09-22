@@ -14,18 +14,18 @@ import (
 	"github.com/osamu/localapp/internal/registry"
 )
 
-// cmdTee copies stdin to stdout unchanged and forwards the same bytes to the
+// cmdLogForward copies stdin to stdout unchanged and forwards the same bytes to the
 // daemon's log stream for an already registered service. It is the way to get
 // Web logs for processes that `run` cannot wrap (services registered with
 // `add`, `docker compose logs`, a log file via `tail -f`).
 //
-// tee never exits because of the daemon's state: exiting would break the pipe
+// logforward never exits because of the daemon's state: exiting would break the pipe
 // and kill the producer with SIGPIPE. Missing registration or an unreachable
 // daemon is reported once on stderr while output keeps flowing to stdout.
-func cmdTee(args []string) int {
-	fs := newFlagSet("tee")
+func cmdLogForward(args []string) int {
+	fs := newFlagSet("logforward")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: <command> 2>&1 | localapp tee [<app>[/<service>]]")
+		fmt.Fprintln(os.Stderr, "usage: <command> 2>&1 | localapp logforward [<app>[/<service>]]")
 		fmt.Fprintln(os.Stderr, "  app defaults to the normalized basename of the cwd, service to "+registry.DefaultService)
 	}
 	pos, err := parseArgs(fs, args)
@@ -57,11 +57,11 @@ func cmdTee(args []string) int {
 			return reportError(err)
 		}
 	}
-	return teeStdin(app, service, os.Stdin, os.Stdout)
+	return forwardStdin(app, service, os.Stdin, os.Stdout)
 }
 
-// teeStdin is cmdTee after argument handling; tests drive it directly.
-func teeStdin(app, service string, in io.Reader, out io.Writer) int {
+// forwardStdin is cmdLogForward after argument handling; tests drive it directly.
+func forwardStdin(app, service string, in io.Reader, out io.Writer) int {
 	client := newClient()
 	warn := func(msg string) { errf("%s", msg) }
 

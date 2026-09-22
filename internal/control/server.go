@@ -124,25 +124,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	parts := splitPath(r.URL.Path)
 
 	switch {
-	case len(parts) == 6 && parts[0] == APIVersion && parts[1] == "apps" && parts[3] == "services" && parts[5] == "logs":
-		if !allow(w, r, http.MethodPost) {
-			return
-		}
-		a, ok := s.store.App(parts[2])
-		_, found := a.Service(parts[4])
-		if !ok || !found || s.logs == nil {
-			writeError(w, 404, CodeNotFound, "log stream unavailable")
-			return
-		}
-		var req struct {
-			Text []byte `json:"text"`
-		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-			writeError(w, 400, CodeBadJSON, "invalid log batch")
-			return
-		}
-		s.logs.Append(parts[2], parts[4], string(req.Text))
-		w.WriteHeader(http.StatusNoContent)
+	case len(parts) >= 6 && parts[0] == APIVersion && parts[1] == "apps" && parts[3] == "services" && parts[5] == "logs":
+		s.serveLogs(w, r, parts[2], parts[4], parts[6:])
 	case len(parts) == 2 && parts[0] == APIVersion && parts[1] == "status":
 		if !allow(w, r, http.MethodGet) {
 			return
@@ -395,4 +378,47 @@ func writeErr(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusInternalServerError, CodeInternal, err.Error())
+}
+
+// serveLogs handles /v1/apps/{app}/services/{service}/logs[/stream]:
+// POST appends a forwarded batch, GET returns the retained window, and
+// GET .../stream follows it as Server-Sent Events (the CLI's logcat -f).
+func (s *Server) serveLogs(w http.ResponseWriter, r *http.Request, app, service string, rest []string) {
+	registered := func() bool {
+		a, ok := s.store.App(app)
+		if !ok {
+			return false
+		}
+		_, found := a.Service(service)
+		return found
+	}
+	if !registered() || s.logs == nil {
+		writeError(w, http.StatusNotFound, CodeNotFound, "log stream unavailable: "+app+"/"+service+" is not registered")
+		return
+	}
+	switch {
+	case len(rest) == 1 && rest[0] == "stream":
+		if !allow(w, r, http.MethodGet) {
+			return
+		}
+		s.logs.ServeSSE(w, r, app, service, registered)
+	case len(rest) != 0:
+		writeError(w, http.StatusNotFound, CodeNotFound, "no such endpoint")
+	case r.Method == http.MethodGet:
+		text, next, captured, _ := s.logs.ReadFrom(app, service, 0)
+		writeJSON(w, http.StatusOK, logstream.Event{Text: text, Captured: captured, Next: next})
+	default:
+		if !allow(w, r, http.MethodPost) {
+			return
+		}
+		var req struct {
+			Text []byte `json:"text"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, CodeBadJSON, "invalid log batch")
+			return
+		}
+		s.logs.Append(app, service, string(req.Text))
+		w.WriteHeader(http.StatusNoContent)
+	}
 }

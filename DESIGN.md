@@ -85,7 +85,8 @@ localapp rm app1/api                       # remove one service
 |---|---|
 | `localapp add <port>` | register (idempotent). `--app --service --path --strip-path --pid --json` |
 | `localapp run [--] <cmd> [args...]` | allocate a free port, inject it as `PORT`, register, run the command; exits with the command's status. `--app --service --path --strip-path` |
-| `localapp tee [<app>[/<service>]]` | copy stdin to stdout and forward it to the Web log stream of a registered service; never exits because of daemon state (that would break the pipe) |
+| `localapp logforward [<app>[/<service>]]` | copy stdin to stdout and forward it to the log stream of a registered service; never exits because of daemon state (that would break the pipe) |
+| `localapp logcat [-f] [-n lines] <app>[/<service>]` | print the captured log of a service (last `lines`, default 200, `0` for the whole window); `-f` follows over the control socket |
 | `localapp rm <app>[/<service>]` | remove registration |
 | `localapp ls [--json]` | list (URL, port, status) |
 | `localapp open <app>` | open in browser |
@@ -149,7 +150,9 @@ Endpoints:
 | `PUT /v1/apps/{app}/services/{service}` | register (idempotent upsert; body: `{"port", "path"?, "strip_path"?, "pid"?}`; response: full service incl. derived fields) | 200 |
 | `DELETE /v1/apps/{app}/services/{service}` | remove a service | 204 |
 | `DELETE /v1/apps/{app}` | remove an app | 204 |
-| `POST /v1/apps/{app}/services/{service}/logs` | append a batch of output to the in-memory Web log stream (body: `{"text": <base64 bytes>}`, max 1 MiB; 404 unless the service is registered) | 204 |
+| `POST /v1/apps/{app}/services/{service}/logs` | append a batch of output to the in-memory log stream (body: `{"text": <base64 bytes>}`, max 1 MiB; 404 unless the service is registered) | 204 |
+| `GET /v1/apps/{app}/services/{service}/logs` | the retained window: `{"text", "captured", "next"}` (`next` is the offset to follow from) | 200 |
+| `GET /v1/apps/{app}/services/{service}/logs/stream` | follow as Server-Sent Events (same events as the dashboard's `/logs/stream`; `Last-Event-ID` resumes) | 200 |
 
 Errors are uniform — `{"error":{"code","message"}}` — with stable machine-readable
 codes: 400 `invalid_name` / `invalid_port` / `invalid_path` / `bad_json`,
@@ -372,10 +375,10 @@ The apex dashboard links each service to `/logs?app=<app>&service=<service>`.
 **Write path.** `localapp run` tees stdout/stderr to a bounded, asynchronous
 queue (the log forwarder) that sends batches every 300 ms over the existing
 private Unix socket (`POST /v1/apps/{app}/services/{service}/logs`).
-`localapp tee` feeds the same forwarder from stdin for processes `run` cannot
+`localapp logforward` feeds the same forwarder from stdin for processes `run` cannot
 wrap (services registered with `add`, `docker compose logs -f`, `tail -f` of a
 log file); it copies stdin to stdout unchanged, so terminal output is kept and
-can be discarded with a shell redirect. tee reports a missing registration or
+can be discarded with a shell redirect. logforward reports a missing registration or
 an unreachable daemon once on stderr and keeps copying: exiting would deliver
 SIGPIPE to the producer. When forwarding later succeeds, the omitted-output
 marker shows the gap. Writers to one service are not exclusive; batches are
@@ -408,5 +411,11 @@ page never grows past what the daemon keeps; pause closes the stream and resume
 reopens it from a fresh `reset`. `/logs/data` returns the same window as one
 JSON snapshot. Log contents are rendered as text, never HTML. Registration is
 required for writes and reads. `add` cannot capture an existing process's
-stdout/stderr; its preview explains how to use `run` or `tee`. The daemon log
-CLI is unchanged.
+stdout/stderr; its preview explains how to use `run` or `logforward`.
+
+**CLI read path.** `localapp logcat` reads the same window over the control
+socket (`GET .../logs`, or `.../logs/stream` with `-f`), so agents and scripts
+can tail application output without a browser. It prints the retained text
+verbatim on stdout, applies `-n` only to the initial window, and exits 1 with a
+message when the service is unregistered or the daemon is unreachable. The
+daemon log (`localapp logs`) is unchanged and separate.
