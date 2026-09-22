@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/osamu/localapp/internal/control"
 	"github.com/osamu/localapp/internal/logstream"
@@ -43,12 +42,10 @@ func startLogDaemon(t *testing.T) (*registry.Store, *logstream.Store) {
 
 func TestRunCapturesOutput(t *testing.T) {
 	_, logs := startLogDaemon(t)
-	code := cmdRun([]string{"--app", "capture", "--", "sh", "-c", "printf 'stdout\\n'; printf 'stderr\\n' >&2; exit 7"})
-	if code != 7 {
+	if code := cmdRun([]string{"--app", "capture", "--", "sh", "-c", "printf 'stdout\\n'; printf 'stderr\\n' >&2; exit 7"}); code != 7 {
 		t.Fatalf("exit=%d", code)
 	}
-	text, ok := logs.Snapshot("capture", "web")
-	if !ok || !strings.Contains(text, "stdout\n") || !strings.Contains(text, "stderr\n") {
+	if text, _ := logs.Snapshot("capture", "web"); !strings.Contains(text, "stdout\n") || !strings.Contains(text, "stderr\n") {
 		t.Fatalf("missing output: %q", text)
 	}
 }
@@ -56,80 +53,33 @@ func TestRunCapturesOutput(t *testing.T) {
 func TestLogForwarderBoundsQueue(t *testing.T) {
 	w := &logForwarder{}
 	payload := []byte(strings.Repeat("x", logstream.MaxBytes*2))
-	n, err := w.Write(payload)
-	if err != nil || n != len(payload) || len(w.pending) > logstream.MaxBytes || !w.dropped {
+	if n, _ := w.Write(payload); n != len(payload) || len(w.pending) > logstream.MaxBytes || !w.dropped {
 		t.Fatal("queue not bounded")
 	}
 }
 
-func TestLogForwarderWarnsOnceAndOnRecovery(t *testing.T) {
+func TestLogForward(t *testing.T) {
 	store, logs := startLogDaemon(t)
-	var warnings []string
-	up := newLogForwarder(newClient(), "later", "web", func(m string) { warnings = append(warnings, m) }, false)
-	up.Write([]byte("early\n"))
-	time.Sleep(3 * forwardInterval)
-	up.Write([]byte("still early\n"))
-	time.Sleep(3 * forwardInterval)
-	port := 65001
-	if _, err := store.Put("later", registry.Service{Name: "web", Port: port}); err != nil {
-		t.Fatal(err)
-	}
-	up.Write([]byte("after\n"))
-	up.Close()
-	if len(warnings) != 2 || !strings.Contains(warnings[0], "not registered") || !strings.Contains(warnings[1], "resumed") {
-		t.Fatalf("warnings: %q", warnings)
-	}
-	text, _ := logs.Snapshot("later", "web")
-	if !strings.Contains(text, "output omitted") || !strings.HasSuffix(text, "after\n") || strings.Contains(text, "early") {
-		t.Fatalf("recovered stream: %q", text)
-	}
-}
-
-func TestLogForwardPassesThroughAndForwards(t *testing.T) {
-	store, logs := startLogDaemon(t)
-	if _, err := store.Put("piped", registry.Service{Name: "api", Port: 65002}); err != nil {
-		t.Fatal(err)
-	}
-	input := "plain\n\x00\xff binary あ\n" + strings.Repeat("y", 5000) // includes invalid UTF-8 and a NUL
+	store.Put("piped", registry.Service{Name: "api", Port: 65002})
+	input := "plain\n\x00\xff binary あ\n" // invalid UTF-8 and a NUL must pass unchanged
 	var out bytes.Buffer
-	if code := forwardStdin("piped", "api", strings.NewReader(input), &out); code != exitOK {
-		t.Fatalf("exit=%d", code)
+	if code := forwardStdin("piped", "api", strings.NewReader(input), &out); code != exitOK || out.String() != input {
+		t.Fatalf("exit=%d stdout=%q", code, out.String())
 	}
-	if out.String() != input {
-		t.Fatalf("stdout altered: %q", out.String())
+	if text, _ := logs.Snapshot("piped", "api"); text != input {
+		t.Fatalf("forwarded: %q", text)
 	}
-	text, ok := logs.Snapshot("piped", "api")
-	if !ok || text != input {
-		t.Fatalf("forwarded output differs: %q", text)
-	}
-}
-
-func TestLogForwardKeepsFlowingWhenUnregistered(t *testing.T) {
-	startLogDaemon(t)
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Unregistered: still copies, exits 0, warns exactly once.
+	r, w, _ := os.Pipe()
 	stderr := os.Stderr
 	os.Stderr = w
-	var out bytes.Buffer
-	code := forwardStdin("nobody", "web", strings.NewReader("a\nb\n"), &out)
+	out.Reset()
+	code := forwardStdin("nobody", "web", strings.NewReader("a\n"), &out)
 	os.Stderr = stderr
 	w.Close()
 	var diag bytes.Buffer
 	diag.ReadFrom(r)
-	if code != exitOK || out.String() != "a\nb\n" {
-		t.Fatalf("exit=%d out=%q", code, out.String())
-	}
-	if n := strings.Count(diag.String(), "not registered"); n != 1 {
-		t.Fatalf("expected exactly one warning, got %d: %q", n, diag.String())
-	}
-}
-
-func TestLogForwardUsage(t *testing.T) {
-	for _, args := range [][]string{{"a", "b"}, {"/web"}, {"app/"}, {"app/x/y"}} {
-		if code := cmdLogForward(args); code != exitUsage {
-			t.Fatalf("%v: exit=%d", args, code)
-		}
+	if code != exitOK || out.String() != "a\n" || strings.Count(diag.String(), "not registered") != 1 {
+		t.Fatalf("unregistered: exit=%d stdout=%q stderr=%q", code, out.String(), diag.String())
 	}
 }

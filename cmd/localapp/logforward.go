@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/osamu/localapp/internal/registry"
@@ -41,21 +40,12 @@ func cmdLogForward(args []string) int {
 	}
 	app, service := "", registry.DefaultService
 	if len(pos) == 1 {
-		var hasService bool
-		app, service, hasService = strings.Cut(pos[0], "/")
-		if app == "" || (hasService && service == "") || strings.Contains(service, "/") {
-			errf("invalid argument: %s (use the form app or app/service)", pos[0])
+		if app, service, err = splitAppService(pos[0]); err != nil {
+			errf("%v", err)
 			return exitUsage
 		}
-		if !hasService {
-			service = registry.DefaultService
-		}
-	}
-	if app == "" {
-		app, err = defaultAppName()
-		if err != nil {
-			return reportError(err)
-		}
+	} else if app, err = defaultAppName(); err != nil {
+		return reportError(err)
 	}
 	return forwardStdin(app, service, os.Stdin, os.Stdout)
 }
