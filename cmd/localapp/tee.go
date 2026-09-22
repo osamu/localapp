@@ -14,7 +14,7 @@ import (
 	"github.com/osamu/localapp/internal/registry"
 )
 
-// cmdTee copies stdin to stdout unchanged and uploads the same bytes to the
+// cmdTee copies stdin to stdout unchanged and forwards the same bytes to the
 // daemon's log stream for an already registered service. It is the way to get
 // Web logs for processes that `run` cannot wrap (services registered with
 // `add`, `docker compose logs`, a log file via `tail -f`).
@@ -69,7 +69,7 @@ func teeStdin(app, service string, in io.Reader, out io.Writer) int {
 	// before the first batch of output.
 	failing := false
 	if view, _, err := client.GetApp(context.Background(), app); err != nil {
-		warn(uploadFailureMessage(err, app, service))
+		warn(forwardFailureMessage(err, app, service))
 		failing = true
 	} else {
 		found := false
@@ -82,7 +82,7 @@ func teeStdin(app, service string, in io.Reader, out io.Writer) int {
 		}
 	}
 
-	up := newLogUploader(client, app, service, warn, failing)
+	up := newLogForwarder(client, app, service, warn, failing)
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

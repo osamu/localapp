@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/osamu/localapp/internal/logstream"
@@ -50,6 +51,7 @@ type Options struct {
 // Handler is the http.Handler of the listing page.
 type Handler struct {
 	logs      *logstream.Store
+	streams   atomic.Int32 // open SSE log streams (bounded by maxLogStreams)
 	store     Store
 	domain    string
 	version   string
@@ -88,7 +90,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		render(w, http.StatusOK, h.data())
-	case "/logs", "/logs/data":
+	case "/logs", "/logs/data", "/logs/stream":
 		h.serveLogs(w, r)
 	case "/delete":
 		switch r.Method {

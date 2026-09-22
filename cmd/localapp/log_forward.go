@@ -10,13 +10,13 @@ import (
 	"github.com/osamu/localapp/internal/logstream"
 )
 
-// uploadInterval is how often queued output is sent to the daemon.
-const uploadInterval = 300 * time.Millisecond
+// forwardInterval is how often queued output is sent to the daemon.
+const forwardInterval = 300 * time.Millisecond
 
-// logUploader queues bytes for the daemon's log stream. Write never waits on
+// logForwarder queues bytes and forwards them to the daemon's log stream over the control socket. Write never waits on
 // the daemon, so a slow or absent daemon cannot stall the producer. Close
-// allows one bounded final upload. It is shared by `run` and `tee`.
-type logUploader struct {
+// allows one bounded final send. It is shared by `run` and `tee`.
+type logForwarder struct {
 	mu      sync.Mutex
 	pending []byte
 	dropped bool
@@ -24,15 +24,15 @@ type logUploader struct {
 	done    chan struct{}
 }
 
-// newLogUploader starts the upload loop. warn, when non-nil, is called once
-// each time uploading starts failing or recovers, with a one-line message.
+// newLogForwarder starts the forwarding loop. warn, when non-nil, is called once
+// each time forwarding starts failing or recovers, with a one-line message.
 // failing seeds that state: a caller that already reported a problem passes
-// true so the first failed upload is not reported twice.
-func newLogUploader(client *control.Client, app, service string, warn func(string), failing bool) *logUploader {
-	w := &logUploader{stop: make(chan struct{}), done: make(chan struct{})}
+// true so the first failed send is not reported twice.
+func newLogForwarder(client *control.Client, app, service string, warn func(string), failing bool) *logForwarder {
+	w := &logForwarder{stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer close(w.done)
-		ticker := time.NewTicker(uploadInterval)
+		ticker := time.NewTicker(forwardInterval)
 		defer ticker.Stop()
 		send := func() {
 			w.mu.Lock()
@@ -42,7 +42,7 @@ func newLogUploader(client *control.Client, app, service string, warn func(strin
 			}
 			text := string(w.pending)
 			if w.dropped {
-				text = "\n[localapp: output omitted while log upload was behind]\n" + text
+				text = "\n[localapp: output omitted while log forwarding was behind]\n" + text
 			}
 			w.pending = nil
 			w.dropped = false
@@ -55,13 +55,13 @@ func newLogUploader(client *control.Client, app, service string, warn func(strin
 				w.dropped = true
 				w.mu.Unlock()
 				if !failing && warn != nil {
-					warn(uploadFailureMessage(err, app, service))
+					warn(forwardFailureMessage(err, app, service))
 				}
 				failing = true
 				return
 			}
 			if failing && warn != nil {
-				warn("log upload to " + app + "/" + service + " resumed")
+				warn("log forwarding to " + app + "/" + service + " resumed")
 			}
 			failing = false
 		}
@@ -78,8 +78,8 @@ func newLogUploader(client *control.Client, app, service string, warn func(strin
 	return w
 }
 
-// uploadFailureMessage explains why output is not being captured.
-func uploadFailureMessage(err error, app, service string) string {
+// forwardFailureMessage explains why output is not being captured.
+func forwardFailureMessage(err error, app, service string) string {
 	var apiErr *control.APIError
 	switch {
 	case errors.As(err, &apiErr) && apiErr.Code == control.CodeNotFound:
@@ -87,11 +87,11 @@ func uploadFailureMessage(err error, app, service string) string {
 	case errors.Is(err, control.ErrUnavailable):
 		return "cannot reach the daemon; output is shown but not captured (" + err.Error() + ")"
 	default:
-		return "log upload failed; output is shown but not captured (" + err.Error() + ")"
+		return "log forwarding failed; output is shown but not captured (" + err.Error() + ")"
 	}
 }
 
-func (w *logUploader) Write(p []byte) (int, error) {
+func (w *logForwarder) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	n := len(p)
@@ -108,4 +108,4 @@ func (w *logUploader) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func (w *logUploader) Close() { close(w.stop); <-w.done }
+func (w *logForwarder) Close() { close(w.stop); <-w.done }

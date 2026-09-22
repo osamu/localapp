@@ -89,3 +89,68 @@ func TestByteCapStartsOnLineBoundary(t *testing.T) {
 		t.Fatalf("single huge line not capped: %d", len(text))
 	}
 }
+
+func TestReadFromFollowsAndResets(t *testing.T) {
+	s := &Store{}
+	if text, next, captured, reset := s.ReadFrom("app", "web", 0); text != "" || next != 0 || captured || reset {
+		t.Fatalf("empty store: %q %d %v %v", text, next, captured, reset)
+	}
+	if _, _, _, reset := s.ReadFrom("app", "web", 7); !reset {
+		t.Fatal("stale offset on an unknown service must reset")
+	}
+	s.Append("app", "web", "one\n")
+	text, next, _, reset := s.ReadFrom("app", "web", 0)
+	if text != "one\n" || next != 4 || reset {
+		t.Fatalf("first read inside the window must not reset: %q %d %v", text, next, reset)
+	}
+	s.Append("app", "web", "two\n")
+	text, next, _, reset = s.ReadFrom("app", "web", next)
+	if text != "two\n" || next != 8 || reset {
+		t.Fatalf("delta: %q %d %v", text, next, reset)
+	}
+	if text, n, _, reset := s.ReadFrom("app", "web", next); text != "" || n != next || reset {
+		t.Fatalf("no new output: %q %d %v", text, n, reset)
+	}
+	// Fill past the window so offset 0 is trimmed away.
+	for i := 0; i < MaxLines; i++ {
+		s.Append("app", "web", "x\n")
+	}
+	text, n, _, reset := s.ReadFrom("app", "web", 0)
+	if !reset || strings.Count(text, "\n") != MaxLines || strings.Contains(text, "one") {
+		t.Fatalf("trimmed offset: reset=%v lines=%d", reset, strings.Count(text, "\n"))
+	}
+	if _, _, _, reset := s.ReadFrom("app", "web", n+1); !reset {
+		t.Fatal("offset beyond end must reset")
+	}
+}
+
+func TestSubscribeNeverBlocksAppend(t *testing.T) {
+	s := &Store{}
+	wake, cancel := s.Subscribe("app", "web")
+	for i := 0; i < 10; i++ {
+		s.Append("app", "web", "x\n") // subscriber never drains; must not block
+	}
+	select {
+	case <-wake:
+	default:
+		t.Fatal("no wake-up")
+	}
+	select {
+	case <-wake:
+		t.Fatal("signals must coalesce")
+	default:
+	}
+	if s.Subscribers("app", "web") != 1 {
+		t.Fatal("subscriber not registered")
+	}
+	cancel()
+	if s.Subscribers("app", "web") != 0 {
+		t.Fatal("subscriber not removed")
+	}
+	s.Append("app", "web", "after\n")
+	select {
+	case <-wake:
+		t.Fatal("cancelled subscriber woken")
+	default:
+	}
+}

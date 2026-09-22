@@ -16,7 +16,7 @@ import (
 )
 
 // startLogDaemon runs a control server on a temporary socket and points the
-// CLI at it. The returned store receives uploaded output.
+// CLI at it. The returned store receives forwarded output.
 func startLogDaemon(t *testing.T) (*registry.Store, *logstream.Store) {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "lalog-")
@@ -53,8 +53,8 @@ func TestRunCapturesOutput(t *testing.T) {
 	}
 }
 
-func TestLogUploaderBoundsQueue(t *testing.T) {
-	w := &logUploader{}
+func TestLogForwarderBoundsQueue(t *testing.T) {
+	w := &logForwarder{}
 	payload := []byte(strings.Repeat("x", logstream.MaxBytes*2))
 	n, err := w.Write(payload)
 	if err != nil || n != len(payload) || len(w.pending) > logstream.MaxBytes || !w.dropped {
@@ -62,14 +62,14 @@ func TestLogUploaderBoundsQueue(t *testing.T) {
 	}
 }
 
-func TestLogUploaderWarnsOnceAndOnRecovery(t *testing.T) {
+func TestLogForwarderWarnsOnceAndOnRecovery(t *testing.T) {
 	store, logs := startLogDaemon(t)
 	var warnings []string
-	up := newLogUploader(newClient(), "later", "web", func(m string) { warnings = append(warnings, m) }, false)
+	up := newLogForwarder(newClient(), "later", "web", func(m string) { warnings = append(warnings, m) }, false)
 	up.Write([]byte("early\n"))
-	time.Sleep(3 * uploadInterval)
+	time.Sleep(3 * forwardInterval)
 	up.Write([]byte("still early\n"))
-	time.Sleep(3 * uploadInterval)
+	time.Sleep(3 * forwardInterval)
 	port := 65001
 	if _, err := store.Put("later", registry.Service{Name: "web", Port: port}); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestLogUploaderWarnsOnceAndOnRecovery(t *testing.T) {
 	}
 }
 
-func TestTeePassesThroughAndUploads(t *testing.T) {
+func TestTeePassesThroughAndForwards(t *testing.T) {
 	store, logs := startLogDaemon(t)
 	if _, err := store.Put("piped", registry.Service{Name: "api", Port: 65002}); err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestTeePassesThroughAndUploads(t *testing.T) {
 	}
 	text, ok := logs.Snapshot("piped", "api")
 	if !ok || text != input {
-		t.Fatalf("uploaded output differs: %q", text)
+		t.Fatalf("forwarded output differs: %q", text)
 	}
 }
 

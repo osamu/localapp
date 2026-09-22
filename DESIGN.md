@@ -85,7 +85,7 @@ localapp rm app1/api                       # remove one service
 |---|---|
 | `localapp add <port>` | register (idempotent). `--app --service --path --strip-path --pid --json` |
 | `localapp run [--] <cmd> [args...]` | allocate a free port, inject it as `PORT`, register, run the command; exits with the command's status. `--app --service --path --strip-path` |
-| `localapp tee [<app>[/<service>]]` | copy stdin to stdout and upload it to the Web log stream of a registered service; never exits because of daemon state (that would break the pipe) |
+| `localapp tee [<app>[/<service>]]` | copy stdin to stdout and forward it to the Web log stream of a registered service; never exits because of daemon state (that would break the pipe) |
 | `localapp rm <app>[/<service>]` | remove registration |
 | `localapp ls [--json]` | list (URL, port, status) |
 | `localapp open <app>` | open in browser |
@@ -368,26 +368,45 @@ gRPC passthrough. The dashboard uses server-rendered HTML with a small script fo
 ### Web log preview
 
 The apex dashboard links each service to `/logs?app=<app>&service=<service>`.
-`localapp run` tees stdout/stderr to a bounded, asynchronous queue and uploads
-batches over the existing private Unix socket (`POST /v1/apps/{app}/services/{service}/logs`).
-`localapp tee` feeds the same uploader from stdin for processes `run` cannot
+
+**Write path.** `localapp run` tees stdout/stderr to a bounded, asynchronous
+queue (the log forwarder) that sends batches every 300 ms over the existing
+private Unix socket (`POST /v1/apps/{app}/services/{service}/logs`).
+`localapp tee` feeds the same forwarder from stdin for processes `run` cannot
 wrap (services registered with `add`, `docker compose logs -f`, `tail -f` of a
 log file); it copies stdin to stdout unchanged, so terminal output is kept and
 can be discarded with a shell redirect. tee reports a missing registration or
 an unreachable daemon once on stderr and keeps copying: exiting would deliver
-SIGPIPE to the producer. When uploads later succeed, the omitted-output marker
-shows the gap. Writers to one service are not exclusive; batches are
-concatenated in receipt order.
-The JSON `text` field contains base64-encoded bytes to preserve UTF-8 characters
-that span upload boundaries; the daemon concatenates batches into one buffer per
-service, so split characters heal on receipt.
-Output remains visible in the terminal; slow/unavailable log upload never blocks
-child output. Overflow is reported in the preview. The daemon retains the last
-1000 lines per service, with a 256 KiB hard cap so a few very long lines cannot
-grow memory, for at most 64 recently active services in memory; restart
-clears history. Retention is by line count only: no timestamps, no expiry
-timers. Logs are not persisted or inferred from arbitrary file paths.
-The browser polls a read-only snapshot once per second, with pause/resume and
-auto-scroll controls. Log contents are rendered as text, never HTML. Registration
-is required for uploads and reads. `add` cannot capture an existing process's
-stdout/stderr; its preview explains how to use `run` or `tee`. The daemon log CLI is unchanged.
+SIGPIPE to the producer. When forwarding later succeeds, the omitted-output
+marker shows the gap. Writers to one service are not exclusive; batches are
+concatenated in receipt order. The JSON `text` field contains base64-encoded
+bytes to preserve UTF-8 characters that span batch boundaries; the daemon
+concatenates batches into one buffer per service, so split characters heal on
+receipt. Output remains visible in the terminal; a slow or absent daemon never
+blocks child output (the queue drops the oldest bytes and inserts a marker).
+
+**Retention.** The daemon retains the last 1000 lines per service, with a
+256 KiB hard cap so a few very long lines cannot grow memory, for at most 64
+recently active services in memory; restart clears history. Retention is by
+line count only: no timestamps, no expiry timers, and no state that depends on
+whether anyone reads. Memory is bounded at about 16 MiB regardless of
+uptime. Logs are not persisted or inferred from arbitrary file paths.
+
+**Read path.** `/logs/stream` serves the retained window as Server-Sent
+Events (stdlib only; a WebSocket server would need a hand-rolled RFC 6455
+implementation or an external dependency). Every byte ever appended has a
+monotonically increasing offset; each event's `id` is the offset to resume
+from, which `EventSource` returns as `Last-Event-ID` on reconnect. Events:
+`reset` (the whole window; sent first and whenever the client's offset has
+been trimmed away), `append` (new output only), `gone` (mapping removed).
+`Append` never waits on a reader: each stream holds a one-slot wake channel and
+re-reads the store from its own offset, so a slow browser only delays itself.
+At most 32 streams are open at once; a comment line every 15 s keeps idle
+connections alive. Request contexts derive from the daemon context, so streams
+end on shutdown. The browser mirrors the retention rule client-side, so the
+page never grows past what the daemon keeps; pause closes the stream and resume
+reopens it from a fresh `reset`. `/logs/data` returns the same window as one
+JSON snapshot. Log contents are rendered as text, never HTML. Registration is
+required for writes and reads. `add` cannot capture an existing process's
+stdout/stderr; its preview explains how to use `run` or `tee`. The daemon log
+CLI is unchanged.

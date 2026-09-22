@@ -174,18 +174,22 @@ func runDaemon(cfg config.Config, logger *log.Logger) error {
 	})
 	// No timeout is set: the first compile of a dev server can take tens of
 	// seconds (DESIGN.md "Proxy requirements").
-	httpsSrv := &http.Server{Handler: px, ErrorLog: logger, TLSConfig: rootCA.TLSConfig()}
-	httpSrv := &http.Server{
-		Handler:           redirectHandler(cfg.HTTPSPort),
-		ErrorLog:          logger,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-
 	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	// If any listener dies, stop everything.
 	ctx, cancel := context.WithCancel(sigCtx)
 	defer cancel()
+
+	// Request contexts derive from ctx so long-lived handlers (the log
+	// stream) end on shutdown instead of holding Shutdown for its timeout.
+	baseCtx := func(net.Listener) context.Context { return ctx }
+	httpsSrv := &http.Server{Handler: px, ErrorLog: logger, TLSConfig: rootCA.TLSConfig(), BaseContext: baseCtx}
+	httpSrv := &http.Server{
+		Handler:           redirectHandler(cfg.HTTPSPort),
+		ErrorLog:          logger,
+		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext:       baseCtx,
+	}
 
 	apps, services := store.Counts()
 	logger.Printf("localapp %s started (domain=%s apps=%d services=%d)", config.Version, cfg.Domain, apps, services)

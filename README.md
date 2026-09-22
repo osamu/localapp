@@ -201,8 +201,8 @@ daemon's launchd configuration.
 
 Open the dashboard at your configured domain and select **Logs** beside a
 service. Commands started with `localapp run` stream combined stdout/stderr to
-the preview while still printing to the terminal. The page updates every second
-and offers pause/resume and auto-scroll.
+the preview while still printing to the terminal. The page follows the output
+live (Server-Sent Events) and offers pause/resume and auto-scroll.
 
 ```sh
 localapp run --app myapp -- npm run dev
@@ -226,7 +226,7 @@ the producer.
 
 The daemon keeps only the last 1000 lines of output (up to 256 KiB) per service
 for up to 64 recently active services in memory. History disappears on daemon restart; output may be omitted
-if uploads fall behind (a marker appears). The child sees pipes instead of a
+if forwarding falls behind (a marker appears). The child sees pipes instead of a
 terminal, so some commands may buffer output or disable color. `localapp logs`
 continues to show the daemon's own log.
 

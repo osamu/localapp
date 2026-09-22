@@ -178,8 +178,8 @@ for `<domain>`.
 
 ## Web log preview
 
-The dashboard's Logs link previews combined stdout/stderr with one-second
-updates, pause/resume, and auto-scroll. Output reaches it in one of two ways:
+The dashboard's Logs link follows combined stdout/stderr live, with
+pause/resume and auto-scroll. Output reaches it in one of two ways:
 
 ```sh
 # 1. start the process through localapp (allocates PORT and registers)
