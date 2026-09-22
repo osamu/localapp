@@ -84,7 +84,7 @@ func cmdRun(args []string) int {
 	child := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 	child.Env = append(os.Environ(), "PORT="+strconv.Itoa(port))
 	child.Stdin = os.Stdin
-	logs := newRunLogWriter(client, appName, *service)
+	logs := newLogUploader(client, appName, *service, nil, false)
 	defer logs.Close()
 	child.Stdout = io.MultiWriter(os.Stdout, logs)
 	child.Stderr = io.MultiWriter(os.Stderr, logs)

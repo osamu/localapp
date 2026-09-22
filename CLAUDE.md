@@ -29,7 +29,8 @@ internal/control/    Control Plane API (HTTP+JSON over Unix socket) + client
 internal/proxy/      reverse proxy: routing, WS passthrough, liveness error pages
 internal/dnsd/       DNS server (miekg/dns — the only external dependency)
 internal/ca/         root CA (Name Constraints) + on-demand SNI issuance
-internal/dashboard/  apex page (html/template, listing + mapping deletion)
+internal/dashboard/  apex page (html/template, listing + mapping deletion + log preview)
+internal/logstream/  in-memory Web log store (last 1000 lines per service)
 internal/scan/       unregistered listening-port detection
 internal/skill/      SKILL.md embedding and placement (claude / codex)
 internal/platform/   OS-specific layer; core packages never import it

@@ -85,6 +85,7 @@ localapp rm app1/api                       # remove one service
 |---|---|
 | `localapp add <port>` | register (idempotent). `--app --service --path --strip-path --pid --json` |
 | `localapp run [--] <cmd> [args...]` | allocate a free port, inject it as `PORT`, register, run the command; exits with the command's status. `--app --service --path --strip-path` |
+| `localapp tee [<app>[/<service>]]` | copy stdin to stdout and upload it to the Web log stream of a registered service; never exits because of daemon state (that would break the pipe) |
 | `localapp rm <app>[/<service>]` | remove registration |
 | `localapp ls [--json]` | list (URL, port, status) |
 | `localapp open <app>` | open in browser |
@@ -148,6 +149,7 @@ Endpoints:
 | `PUT /v1/apps/{app}/services/{service}` | register (idempotent upsert; body: `{"port", "path"?, "strip_path"?, "pid"?}`; response: full service incl. derived fields) | 200 |
 | `DELETE /v1/apps/{app}/services/{service}` | remove a service | 204 |
 | `DELETE /v1/apps/{app}` | remove an app | 204 |
+| `POST /v1/apps/{app}/services/{service}/logs` | append a batch of output to the in-memory Web log stream (body: `{"text": <base64 bytes>}`, max 1 MiB; 404 unless the service is registered) | 204 |
 
 Errors are uniform — `{"error":{"code","message"}}` — with stable machine-readable
 codes: 400 `invalid_name` / `invalid_port` / `invalid_path` / `bad_json`,
@@ -368,18 +370,24 @@ gRPC passthrough. The dashboard uses server-rendered HTML with a small script fo
 The apex dashboard links each service to `/logs?app=<app>&service=<service>`.
 `localapp run` tees stdout/stderr to a bounded, asynchronous queue and uploads
 batches over the existing private Unix socket (`POST /v1/apps/{app}/services/{service}/logs`).
+`localapp tee` feeds the same uploader from stdin for processes `run` cannot
+wrap (services registered with `add`, `docker compose logs -f`, `tail -f` of a
+log file); it copies stdin to stdout unchanged, so terminal output is kept and
+can be discarded with a shell redirect. tee reports a missing registration or
+an unreachable daemon once on stderr and keeps copying: exiting would deliver
+SIGPIPE to the producer. When uploads later succeed, the omitted-output marker
+shows the gap. Writers to one service are not exclusive; batches are
+concatenated in receipt order.
 The JSON `text` field contains base64-encoded bytes to preserve UTF-8 characters
-that span upload boundaries.
+that span upload boundaries; the daemon concatenates batches into one buffer per
+service, so split characters heal on receipt.
 Output remains visible in the terminal; slow/unavailable log upload never blocks
-child output. Overflow is reported in the preview. The daemon retains up to
-the last 5 minutes (by daemon receipt time), capped at 256 KiB per service
-for at most 64 recently active services in memory; restart
-clears history. Logs are not persisted or inferred from arbitrary file paths.
+child output. Overflow is reported in the preview. The daemon retains the last
+1000 lines per service, with a 256 KiB hard cap so a few very long lines cannot
+grow memory, for at most 64 recently active services in memory; restart
+clears history. Retention is by line count only: no timestamps, no expiry
+timers. Logs are not persisted or inferred from arbitrary file paths.
 The browser polls a read-only snapshot once per second, with pause/resume and
 auto-scroll controls. Log contents are rendered as text, never HTML. Registration
 is required for uploads and reads. `add` cannot capture an existing process's
-stdout/stderr; its preview explains how to use `run`. The daemon log CLI is unchanged.
-
-Log batches expire five minutes after daemon receipt. Reads prune expired output
-even for idle services. The browser also expires cached batches every second,
-including while paused or disconnected, so old output does not remain on screen.
+stdout/stderr; its preview explains how to use `run` or `tee`. The daemon log CLI is unchanged.

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestBoundedAndIsolated(t *testing.T) {
@@ -46,41 +45,47 @@ func TestConcurrent(t *testing.T) {
 	}
 }
 
-func TestRetention(t *testing.T) {
-	now := time.Unix(1000, 0)
-	s := &Store{now: func() time.Time { return now }}
-	s.Append("app", "web", "old\n")
-	now = now.Add(time.Minute)
-	s.Append("app", "web", "recent\n")
-	now = now.Add(Retention - time.Minute - time.Millisecond)
-	if text, _ := s.Snapshot("app", "web"); text != "old\nrecent\n" {
-		t.Fatalf("expired too soon: %q", text)
+func TestKeepsLastLines(t *testing.T) {
+	s := &Store{}
+	for i := 1; i <= MaxLines+5; i++ {
+		s.Append("app", "web", fmt.Sprintf("line %d\n", i))
 	}
-	now = now.Add(time.Millisecond)
-	if text, _ := s.Snapshot("app", "web"); text != "recent\n" {
-		t.Fatalf("expiry boundary: %q", text)
+	text, _ := s.Snapshot("app", "web")
+	if !strings.HasPrefix(text, "line 6\n") || !strings.HasSuffix(text, fmt.Sprintf("line %d\n", MaxLines+5)) {
+		t.Fatalf("wrong window: %.40q ... %.40q", text, text[len(text)-40:])
 	}
-	now = now.Add(time.Minute)
-	if text, ok := s.Snapshot("app", "web"); text != "" || !ok {
-		t.Fatalf("idle stream: text=%q captured=%v", text, ok)
-	}
-	s.Append("app", "web", "new\n")
-	if text, _ := s.Snapshot("app", "web"); text != "new\n" {
-		t.Fatalf("old output restored: %q", text)
+	if got := strings.Count(text, "\n"); got != MaxLines {
+		t.Fatalf("kept %d lines", got)
 	}
 }
 
-func TestChunksAreCopiedAndByteBounded(t *testing.T) {
+func TestPartialLineCountsAndSplitLinesJoin(t *testing.T) {
 	s := &Store{}
-	s.Append("app", "web", strings.Repeat("x", MaxBytes-1))
-	s.Append("app", "web", "last")
-	chunks, _ := s.Chunks("app", "web")
-	if chunks[0].ExpiresAt == 0 {
-		t.Fatal("expiry missing")
+	s.Append("app", "web", "a\n")
+	s.Append("app", "web", "partial")
+	s.Append("app", "web", " rest\n")
+	if text, _ := s.Snapshot("app", "web"); text != "a\npartial rest\n" {
+		t.Fatalf("batches not joined: %q", text)
 	}
-	chunks[0].Text = "changed"
+	s = &Store{}
+	s.Append("app", "web", strings.Repeat("x\n", MaxLines)+"tail")
 	text, _ := s.Snapshot("app", "web")
-	if len(text) != MaxBytes || !strings.HasSuffix(text, "last") {
-		t.Fatal("snapshot mutated or byte limit broken")
+	if strings.Count(text, "\n") != MaxLines-1 || !strings.HasSuffix(text, "tail") {
+		t.Fatalf("trailing partial line not counted: %d lines", strings.Count(text, "\n"))
+	}
+}
+
+func TestByteCapStartsOnLineBoundary(t *testing.T) {
+	s := &Store{}
+	line := strings.Repeat("y", 1000) + "\n"
+	s.Append("app", "web", strings.Repeat(line, 300)) // 300 lines, ~293 KiB
+	text, _ := s.Snapshot("app", "web")
+	if len(text) > MaxBytes || !strings.HasPrefix(text, "y") || len(text)%len(line) != 0 {
+		t.Fatalf("byte cap left a partial first line: len=%d", len(text))
+	}
+	s = &Store{}
+	s.Append("app", "web", strings.Repeat("z", MaxBytes+10))
+	if text, _ := s.Snapshot("app", "web"); len(text) != MaxBytes {
+		t.Fatalf("single huge line not capped: %d", len(text))
 	}
 }

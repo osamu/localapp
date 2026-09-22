@@ -209,14 +209,23 @@ localapp run --app myapp -- npm run dev
 ```
 
 `localapp add` registers only the target port and optional PID. It cannot attach
-to an already running process's stdout/stderr, so services registered with
-`localapp add` do not produce a Web log stream. Restart the process with
-`localapp run` when Web logs are needed. There is currently no command for
-piping a log file or another process's output into localapp.
+to an already running process's stdout/stderr. For such services, pipe the
+output through `localapp tee`, which copies stdin to stdout and sends the same
+bytes to the Web log stream of the registered service:
 
-The daemon keeps only the last 5 minutes of output (by receipt time), capped at
-256 KiB per service for up to 64 recently active
-services in memory. History disappears on daemon restart; output may be omitted
+```sh
+localapp add 5173 --app myapp
+npm run dev 2>&1 | localapp tee myapp            # service defaults to web
+docker compose logs -f 2>&1 | localapp tee myapp/api
+tail -f server.log | localapp tee myapp > /dev/null   # Web only
+```
+
+`tee` keeps copying even when the service is not registered or the daemon is
+down (it warns once on stderr), because exiting would break the pipe and stop
+the producer.
+
+The daemon keeps only the last 1000 lines of output (up to 256 KiB) per service
+for up to 64 recently active services in memory. History disappears on daemon restart; output may be omitted
 if uploads fall behind (a marker appears). The child sees pipes instead of a
 terminal, so some commands may buffer output or disable color. `localapp logs`
 continues to show the daemon's own log.

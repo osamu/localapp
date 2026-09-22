@@ -5,16 +5,7 @@ import (
 	"encoding/json"
 	"html/template"
 	"net/http"
-	"strings"
-
-	"github.com/osamu/localapp/internal/logstream"
 )
-
-// logChunk transports raw bytes so split UTF-8 sequences survive batch boundaries.
-type logChunk struct {
-	Data      []byte `json:"data"`
-	ExpiresAt int64  `json:"expiresAt"`
-}
 
 func (h *Handler) serveLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -29,24 +20,17 @@ func (h *Handler) serveLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.URL.Path == "/logs/data" {
-		var text strings.Builder
-		chunks := []logChunk{}
+		var text string
 		var captured bool
 		if h.logs != nil {
-			var retained []logstream.Chunk
-			retained, captured = h.logs.Chunks(app, service)
-			for _, chunk := range retained {
-				text.WriteString(chunk.Text)
-				chunks = append(chunks, logChunk{Data: []byte(chunk.Text), ExpiresAt: chunk.ExpiresAt})
-			}
+			text, captured = h.logs.Snapshot(app, service)
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		if r.Method != http.MethodHead {
 			_ = json.NewEncoder(w).Encode(struct {
-				Text     string     `json:"text"`
-				Chunks   []logChunk `json:"chunks"`
-				Captured bool       `json:"captured"`
-			}{text.String(), chunks, captured})
+				Text     string `json:"text"`
+				Captured bool   `json:"captured"`
+			}{text, captured})
 		}
 		return
 	}
@@ -76,26 +60,21 @@ pre { background: #111820; color: #e5edf5; padding: 1rem; height: 60vh; overflow
 </style></head><body><main>
 <a href="/">← Dashboard</a><h1>{{.App}}/{{.Service}} logs</h1>
 <div class="controls"><button id="pause" type="button">Pause</button><label><input id="scroll" type="checkbox" checked> Auto-scroll</label><span id="status" role="status">Connecting…</span></div>
-<p id="empty" hidden>No captured output yet. Start this service with <code>localapp run --app {{.App}} --service {{.Service}} -- &lt;command&gt;</code>. Apps registered only with <code>localapp add</code> do not provide process output.</p>
+<p id="empty" hidden>No captured output yet. Start this service with <code>localapp run --app {{.App}} --service {{.Service}} -- &lt;command&gt;</code>, or pipe an already running process into it: <code>&lt;command&gt; 2&gt;&amp;1 | localapp tee {{.App}}/{{.Service}}</code>.</p>
 <pre id="output" tabindex="0" aria-label="Application log output"></pre>
-<p class="hint">Updates every second. Only the last 5 minutes of combined stdout/stderr (up to 256 KiB); expired output is removed even while paused or disconnected; history is held in memory and cleared when the daemon restarts. Up to 64 recently active services are retained.</p>
+<p class="hint">Updates every second. Only the last 1000 lines of combined stdout/stderr (up to 256 KiB) are kept; history is held in memory and cleared when the daemon restarts. Up to 64 recently active services are retained.</p>
 <noscript>Enable JavaScript to preview live logs.</noscript>
 <script nonce="{{.Nonce}}">
 const output = document.getElementById('output');
 const status = document.getElementById('status');
 const pause = document.getElementById('pause');
 let paused = false;
-let chunks = [];
-function expireAndRender() {
- chunks = chunks.filter(chunk => chunk.expiresAt > Date.now());
- const decoder = new TextDecoder();
- const text = chunks.map(chunk => decoder.decode(Uint8Array.from(atob(chunk.data), c => c.charCodeAt(0)), {stream: true})).join('') + decoder.decode();
+function render(text) {
  if (output.textContent !== text) {
   output.textContent = text;
-  if (!paused && document.getElementById('scroll').checked) output.scrollTop = output.scrollHeight;
+  if (document.getElementById('scroll').checked) output.scrollTop = output.scrollHeight;
  }
 }
-setInterval(expireAndRender, 1000);
 pause.addEventListener('click', () => { paused = !paused; pause.textContent = paused ? 'Resume' : 'Pause'; status.textContent = paused ? 'Paused' : 'Connecting…'; });
 async function refresh() {
  if (!paused) {
@@ -106,8 +85,7 @@ async function refresh() {
    if (!response.ok) throw new Error(response.status === 404 ? 'Service removed. Return to the dashboard.' : 'Connection lost. Retrying…');
    const data = await response.json();
    if (!paused) {
-    chunks = data.chunks;
-    expireAndRender();
+    render(data.text);
     document.getElementById('empty').hidden = data.captured;
     status.textContent = data.captured ? (data.text ? 'Live' : 'Waiting for output…') : 'No log stream';
    }

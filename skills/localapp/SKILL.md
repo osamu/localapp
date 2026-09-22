@@ -178,21 +178,25 @@ for `<domain>`.
 
 ## Web log preview
 
-The dashboard's Logs link previews combined stdout/stderr from `localapp run`,
-with one-second updates, pause/resume, and auto-scroll. Use this form when the
-user needs Web logs:
+The dashboard's Logs link previews combined stdout/stderr with one-second
+updates, pause/resume, and auto-scroll. Output reaches it in one of two ways:
 
 ```sh
+# 1. start the process through localapp (allocates PORT and registers)
 localapp run --app <app> --service <service> -- <command> [args...]
+
+# 2. pipe the output of an already registered service
+<command> 2>&1 | localapp tee <app>[/<service>]
 ```
 
-`localapp add` registers a port and optional PID only. It cannot attach to an
-existing process's stdout/stderr, so an app registered with `add` has no Web log
-stream. Do not claim that PID registration captures logs, and do not suggest a
-log-push or pipe command: localapp does not currently provide one. If Web logs
-are required, explain that the process must be restarted with `localapp run`.
+`localapp add` registers a port and optional PID only; it never captures a
+process's stdout/stderr. Do not claim that PID registration captures logs. When
+a service was registered with `add` (a fixed port, `docker compose`, a log file)
+and Web logs are needed, keep the registration and pipe the output through
+`localapp tee`, which also keeps printing it to stdout. `tee` keeps copying when
+the service is unregistered or the daemon is down and warns once on stderr.
 
-History is in memory (the last 5 minutes by receipt time, up to 256 KiB per
-service and 64 services) and clears on daemon restart. Use the configured domain
+History is in memory (the last 1000 lines, up to 256 KiB per service, for 64
+services) and clears on daemon restart. Use the configured domain
 from API URLs; do not assume the default domain. `localapp logs` remains the
 daemon's own log and does not contain application output.
