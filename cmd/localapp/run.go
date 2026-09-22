@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -83,8 +84,10 @@ func cmdRun(args []string) int {
 	child := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 	child.Env = append(os.Environ(), "PORT="+strconv.Itoa(port))
 	child.Stdin = os.Stdin
-	child.Stdout = os.Stdout
-	child.Stderr = os.Stderr
+	logs := newLogForwarder(client, appName, *service, nil, false)
+	defer logs.Close()
+	child.Stdout = io.MultiWriter(os.Stdout, logs)
+	child.Stderr = io.MultiWriter(os.Stderr, logs)
 	if err := child.Start(); err != nil {
 		return reportError(fmt.Errorf("starting %s: %w", cmdArgs[0], err))
 	}

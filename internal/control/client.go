@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,7 +11,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
+
+	"github.com/osamu/localapp/internal/logstream"
 )
 
 // Client is the client of the Control Plane API. The CLI calls the API through
@@ -18,22 +22,26 @@ import (
 type Client struct {
 	socketPath string
 	http       *http.Client
+	// stream has no timeout: FollowLogs holds a response open indefinitely.
+	stream *http.Client
 }
 
 // NewClient builds an API client over a Unix socket.
 func NewClient(socketPath string) *Client {
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", socketPath)
+		},
+	}
 	return &Client{
 		socketPath: socketPath,
 		http: &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					var d net.Dialer
-					return d.DialContext(ctx, "unix", socketPath)
-				},
-			},
+			Transport: transport,
 			// Generous, because the daemon side also runs liveness probes.
 			Timeout: 10 * time.Second,
 		},
+		stream: &http.Client{Transport: transport},
 	}
 }
 
@@ -81,14 +89,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		var uerr *url.Error
-		if errors.As(err, &uerr) {
-			var oerr *net.OpError
-			if errors.As(uerr.Err, &oerr) {
-				return nil, fmt.Errorf("%w (%s)", ErrUnavailable, c.socketPath)
-			}
-		}
-		return nil, err
+		return nil, c.wrapDialError(err)
 	}
 	defer resp.Body.Close()
 
@@ -170,4 +171,66 @@ func (c *Client) DeleteApp(ctx context.Context, app string) error {
 func (c *Client) DeleteService(ctx context.Context, app, service string) error {
 	_, err := c.do(ctx, http.MethodDelete, "/v1/apps/"+app+"/services/"+service, nil)
 	return err
+}
+
+// AppendLogs forwards a batch of captured output through the private socket.
+func (c *Client) AppendLogs(ctx context.Context, app, service, text string) error {
+	_, err := c.do(ctx, http.MethodPost, "/v1/apps/"+app+"/services/"+service+"/logs", struct {
+		Text []byte `json:"text"`
+	}{[]byte(text)})
+	return err
+}
+
+// wrapDialError maps a failed connection to ErrUnavailable.
+func (c *Client) wrapDialError(err error) error {
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		var oerr *net.OpError
+		if errors.As(uerr.Err, &oerr) {
+			return fmt.Errorf("%w (%s)", ErrUnavailable, c.socketPath)
+		}
+	}
+	return err
+}
+
+// Logs calls GET /v1/apps/{app}/services/{service}/logs: the retained window.
+func (c *Client) Logs(ctx context.Context, app, service string) (logstream.Event, []byte, error) {
+	var ev logstream.Event
+	raw, err := c.do(ctx, http.MethodGet, "/v1/apps/"+app+"/services/"+service+"/logs", nil)
+	if err != nil {
+		return ev, raw, err
+	}
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		return ev, raw, fmt.Errorf("decoding response: %w", err)
+	}
+	return ev, raw, nil
+}
+
+// FollowLogs streams GET .../logs/stream and calls fn for every event until
+// the stream ends, ctx is cancelled, or fn returns an error. offset resumes
+// from a previous event id; 0 starts with the whole retained window.
+func (c *Client) FollowLogs(ctx context.Context, app, service string, offset uint64, fn func(event string, id uint64, ev logstream.Event) error) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localapp/v1/apps/"+app+"/services/"+service+"/logs/stream", nil)
+	if err != nil {
+		return fmt.Errorf("building request: %w", err)
+	}
+	if offset != 0 {
+		req.Header.Set("Last-Event-ID", strconv.FormatUint(offset, 10))
+	}
+	resp, err := c.stream.Do(req)
+	if err != nil {
+		return c.wrapDialError(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		ae := &APIError{HTTPStatus: resp.StatusCode}
+		var eb ErrorBody
+		if json.Unmarshal(raw, &eb) == nil {
+			ae.Code = eb.Error.Code
+			ae.Message = eb.Error.Message
+		}
+		return ae
+	}
+	return logstream.ReadSSE(ctx, bufio.NewReader(resp.Body), fn)
 }

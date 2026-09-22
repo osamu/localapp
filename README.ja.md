@@ -158,3 +158,44 @@ resolver 設定・キーチェーンの CA・常駐登録・状態ディレク�
 | `LOCALAPP_HTTP_PORT` / `LOCALAPP_HTTPS_PORT` | `80` / `443` |
 | `LOCALAPP_STATE_DIR` | `/usr/local/var/localapp` |
 | `LOCALAPP_SOCKET` | `<state>/control.sock` |
+
+## Webでアプリのログを見る
+
+設定したドメインのダッシュボードで、各サービスの **Logs** を開く。
+`localapp run` で起動したコマンドの標準出力・標準エラーを、ターミナルと
+Webの両方で確認できる。画面は出力をリアルタイムに追従し（Server-Sent Events）、
+一時停止・再開と自動スクロールに対応する。
+
+```sh
+localapp run --app myapp -- npm run dev
+```
+
+`localapp add` が登録するのは接続先ポートと、指定した場合の PID だけで、
+すでに動いているプロセスの標準出力・標準エラーには後から接続できない。
+このようなサービスでは、出力を `localapp logforward` にパイプする。`logforward` は
+標準入力をそのまま標準出力へ書き出しつつ、同じ内容を登録済みサービスのログへ送る。
+
+```sh
+localapp add 5173 --app myapp
+npm run dev 2>&1 | localapp logforward myapp            # service は既定で web
+docker compose logs -f 2>&1 | localapp logforward myapp/api
+tail -f server.log | localapp logforward myapp > /dev/null   # Web のみ
+```
+
+サービスが未登録、またはデーモンが停止している場合も `logforward` は転送を続ける
+（標準エラーに 1 回だけ警告する）。終了するとパイプが切れ、出力元のプロセスが
+停止するためである。
+
+同じログはターミナルからも読める。Coding Agent がブラウザなしで開発サーバの
+出力を確認する手段である。
+
+```sh
+localapp logcat myapp            # 直近 200 行
+localapp logcat -f myapp/api     # 追従
+localapp logcat -n 0 myapp       # 保持している全体
+```
+
+ログは各サービスの直近1000行（最大256 KiB）を、最大64サービス分メモリに保持し、
+デーモン再起動時に消去する。送信が追いつかない場合は省略の通知を表示する。
+子プロセスの出力先がパイプになるため、コマンドによっては出力のバッファリングや
+色の無効化が発生する。`localapp logs` は従来どおりデーモン自身のログを表示する。

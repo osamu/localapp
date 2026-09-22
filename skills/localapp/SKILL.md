@@ -175,3 +175,42 @@ for `<domain>`.
 | The app generates `http://` URLs | configure it to honor `X-Forwarded-Proto: https` |
 | Node / curl report a certificate error | `NODE_EXTRA_CA_CERTS=$(localapp ca path)` / `SSL_CERT_FILE=$(localapp ca path)` |
 | Certificate error in the browser (Firefox only) | Firefox has its own trust store; tell the user to add the CA manually |
+
+## Web log preview
+
+The dashboard's Logs link follows combined stdout/stderr live, with
+pause/resume and auto-scroll. Output reaches it in one of two ways:
+
+```sh
+# 1. start the process through localapp (allocates PORT and registers)
+localapp run --app <app> --service <service> -- <command> [args...]
+
+# 2. pipe the output of an already registered service
+<command> 2>&1 | localapp logforward <app>[/<service>]
+```
+
+Read the captured log from the terminal instead of the browser when you need
+to check what a dev server printed:
+
+```sh
+localapp logcat <app>[/<service>]          # last 200 lines
+localapp logcat -f <app>[/<service>]       # follow (Ctrl-C to stop)
+localapp logcat -n 0 <app>[/<service>]     # the whole retained window
+```
+
+`logcat` exits 1 with a message when the service is unregistered or the daemon
+is not running. An empty result with exit 0 means nothing has been captured
+yet: the process was started without `run` or `logforward`.
+
+`localapp add` registers a port and optional PID only; it never captures a
+process's stdout/stderr. Do not claim that PID registration captures logs. When
+a service was registered with `add` (a fixed port, `docker compose`, a log file)
+and Web logs are needed, keep the registration and pipe the output through
+`localapp logforward`, which also keeps printing it to stdout. `logforward`
+keeps copying when the service is unregistered or the daemon is down and warns
+once on stderr.
+
+History is in memory (the last 1000 lines, up to 256 KiB per service, for 64
+services) and clears on daemon restart. Use the configured domain
+from API URLs; do not assume the default domain. `localapp logs` remains the
+daemon's own log and does not contain application output.

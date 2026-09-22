@@ -197,6 +197,48 @@ daemon's launchd configuration.
 | `LOCALAPP_STATE_DIR` | `/usr/local/var/localapp` |
 | `LOCALAPP_SOCKET` | `<state>/control.sock` |
 
+## Web log preview
+
+Open the dashboard at your configured domain and select **Logs** beside a
+service. Commands started with `localapp run` stream combined stdout/stderr to
+the preview while still printing to the terminal. The page follows the output
+live (Server-Sent Events) and offers pause/resume and auto-scroll.
+
+```sh
+localapp run --app myapp -- npm run dev
+```
+
+`localapp add` registers only the target port and optional PID. It cannot attach
+to an already running process's stdout/stderr. For such services, pipe the
+output through `localapp logforward`, which copies stdin to stdout and sends
+the same bytes to the log stream of the registered service:
+
+```sh
+localapp add 5173 --app myapp
+npm run dev 2>&1 | localapp logforward myapp            # service defaults to web
+docker compose logs -f 2>&1 | localapp logforward myapp/api
+tail -f server.log | localapp logforward myapp > /dev/null   # Web only
+```
+
+`logforward` keeps copying even when the service is not registered or the
+daemon is down (it warns once on stderr), because exiting would break the pipe
+and stop the producer.
+
+The same log is readable from the terminal, which is how coding agents check a
+dev server's output without a browser:
+
+```sh
+localapp logcat myapp            # last 200 lines
+localapp logcat -f myapp/api     # follow
+localapp logcat -n 0 myapp       # the whole retained window
+```
+
+The daemon keeps only the last 1000 lines of output (up to 256 KiB) per service
+for up to 64 recently active services in memory. History disappears on daemon restart; output may be omitted
+if forwarding falls behind (a marker appears). The child sees pipes instead of a
+terminal, so some commands may buffer output or disable color. `localapp logs`
+continues to show the daemon's own log.
+
 ## License
 
 [MIT](LICENSE)
